@@ -31,6 +31,7 @@ def _save(data: dict) -> None:
 def normalize_url(url: str) -> str:
     parts = urlsplit(url.strip())
     host = (parts.hostname or "").lower()
+    host = host.removeprefix("www.")  # feeds and HN disagree on www.
     path = parts.path.rstrip("/")
     return urlunsplit((parts.scheme.lower(), host, path, "", ""))
 
