@@ -1,0 +1,44 @@
+{
+  "sources": [
+    {
+      "domain": "openai.com",
+      "feed_url": "https://openai.com/news/rss.xml",
+      "name": "OpenAI News",
+      "added_by": "seed",
+      "added_at": "2026-07-25",
+      "slot_yield": {}
+    },
+    {
+      "domain": "huggingface.co",
+      "feed_url": "https://huggingface.co/blog/feed.xml",
+      "name": "Hugging Face Blog",
+      "added_by": "seed",
+      "added_at": "2026-07-25",
+      "slot_yield": {}
+    },
+    {
+      "domain": "blog.google",
+      "feed_url": "https://blog.google/technology/ai/rss/",
+      "name": "Google AI Blog",
+      "added_by": "seed",
+      "added_at": "2026-07-25",
+      "slot_yield": {}
+    },
+    {
+      "domain": "arstechnica.com",
+      "feed_url": "https://arstechnica.com/ai/feed/",
+      "name": "Ars Technica AI",
+      "added_by": "seed",
+      "added_at": "2026-07-25",
+      "slot_yield": {}
+    },
+    {
+      "domain": "theverge.com",
+      "feed_url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+      "name": "The Verge AI",
+      "added_by": "seed",
+      "added_at": "2026-07-25",
+      "slot_yield": {}
+    }
+  ]
+}
