@@ -12,7 +12,17 @@ from urllib.parse import urlsplit
 import config
 import runs
 
+# Hacker News is RANKING SIGNAL ONLY: its API may be fetched, but pages HN
+# links to are subject to the same allowlist as everything else — facts come
+# exclusively from allowlisted primary sources. The endpoint lives here (not
+# in find.py) because this module decides what may be fetched.
+_HN_API_BASE = "https://hacker-news.firebaseio.com/v0"
+
 _cache: list[dict] | None = None
+
+
+def hn_api_url(path: str) -> str:
+    return f"{_HN_API_BASE}/{path}"
 
 
 def all_sources() -> list[dict]:
