@@ -74,6 +74,10 @@ rather than trusting the HTML.
 **Never estimate word timing from character counts.** Real per-word timings come from
 the ElevenLabs alignment and are in the payload.
 
+**Strip `www.` before matching feed URLs against HN URLs.** The Verge's feed links to
+`www.theverge.com`, HN submitters usually drop the `www`, and exact-host matching
+silently zeroes the HN signal for that entire source.
+
 **Deterministic checks run in Python, never through a model.** Verbatim quote matching
 is a substring search. Scale-anchor arithmetic is division. Date filtering is a
 comparison. These are also the only checks immune to shared model priors, which

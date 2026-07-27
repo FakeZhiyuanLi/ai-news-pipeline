@@ -23,7 +23,10 @@ _ARTIFACT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 # Which stage produces which artifact, for actionable read() errors. Extend
 # this as stages are implemented; stages themselves never see these names.
-ARTIFACT_PRODUCERS: dict[str, str] = {}
+ARTIFACT_PRODUCERS: dict[str, str] = {
+    "candidates": "find",
+    "story": "pick",
+}
 
 
 class ArtifactExistsError(RuntimeError):

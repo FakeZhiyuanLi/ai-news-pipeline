@@ -9,12 +9,16 @@ import logging
 import sys
 
 import runs
+import stages.find
+import stages.pick
 
 log = logging.getLogger("run")
 
-# name -> callable(run). One line per stage, e.g.:
-#   STAGES["select"] = stages.select.run
-STAGES: dict = {}
+# name -> callable(run). One line per stage; dict order is pipeline order.
+STAGES: dict = {
+    "find": stages.find.run,
+    "pick": stages.pick.run,
+}
 
 
 def _resolve_run(args) -> runs.Run:

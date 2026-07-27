@@ -17,6 +17,21 @@ MAX_BEATS = MAX_SECONDS // SECONDS_PER_BEAT
 WORDS_PER_SECOND = 2.1  # measured across three real narrations; 2.5 is 20% optimistic
 MAX_DRAFT_ATTEMPTS = 3
 
+# --- Candidate finding -----------------------------------------------------
+
+HN_TOP_STORIES = 60  # how deep into /v0/topstories.json to look
+HN_FETCH_TIMEOUT_SECONDS = 10
+HN_FETCH_THREADS = 8
+# signal_score = (COMMENT_W * descendants + POINT_W * points) / (age_h + OFFSET).
+# Comments weigh above points: comments proxy for "people are arguing about this".
+HN_COMMENT_WEIGHT = 2.0
+HN_POINT_WEIGHT = 1.0
+HN_AGE_OFFSET_HOURS = 2.0  # damps the near-zero-age spike for brand-new posts
+
+SUMMARY_MAX_CHARS = 1000  # stored per candidate, HTML stripped
+RANK_SUMMARY_CHARS = 400  # how much of the summary the ranking model sees
+RANK_MAX_SCORE = 10
+
 # --- Models ----------------------------------------------------------------
 
 CHEAP_MODEL = "gemini-3.5-flash-lite"
