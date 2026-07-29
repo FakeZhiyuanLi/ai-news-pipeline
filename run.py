@@ -9,6 +9,7 @@ import logging
 import sys
 
 import runs
+import stages.draft
 import stages.find
 import stages.pick
 import stages.report
@@ -20,6 +21,7 @@ STAGES: dict = {
     "find": stages.find.run,
     "pick": stages.pick.run,
     "report": stages.report.run,
+    "draft": stages.draft.run,
 }
 
 

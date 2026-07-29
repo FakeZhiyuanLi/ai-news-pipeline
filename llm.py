@@ -18,6 +18,7 @@ Schema dict — unlike the legacy google-generativeai SDK's generation_config.
 import datetime as _dt
 import json
 import logging
+import re
 import time
 
 from google import genai
@@ -48,12 +49,17 @@ def _client() -> genai.Client:
 
 class _TokenBucket:
     """Refills at rpm/60 tokens per second; acquire() blocks until a token
-    is available and logs how long it waited."""
+    is available and logs how long it waited.
+
+    Starts EMPTY and holds capacity 1. The provider enforces a rolling
+    per-minute window, so a full bucket would let 15 calls through in the
+    first second and earn an immediate 429 — the burst allowance a classic
+    token bucket grants is exactly wrong here."""
 
     def __init__(self, rpm: int, clock=time.monotonic, sleep=time.sleep):
         self.rate = rpm / 60.0
-        self.capacity = float(rpm)
-        self.tokens = float(rpm)
+        self.capacity = 1.0
+        self.tokens = 0.0
         self._clock = clock
         self._sleep = sleep
         self._updated = clock()
@@ -72,8 +78,26 @@ class _TokenBucket:
             self._refill()
         self.tokens -= 1.0
 
+    def penalise(self, seconds: float) -> None:
+        """Charge a 429 backoff against the bucket, so the wait does not
+        silently refill it and release a burst the moment it ends."""
+        self.tokens = min(self.tokens, 0.0) - seconds * self.rate
+
 
 _buckets = {model: _TokenBucket(rpm) for model, rpm in config.MODEL_RPM.items()}
+
+
+def _retry_delay(error) -> float:
+    """The provider states how long to wait in RetryInfo; honouring it beats
+    guessing, because our RPM assumption can be wrong (a free-tier quota is
+    per project, not per client)."""
+    details = getattr(error, "details", None) or {}
+    for detail in (details.get("error", {}).get("details") or []):
+        if detail.get("@type", "").endswith("RetryInfo"):
+            match = re.fullmatch(r"(\d+(?:\.\d+)?)s", str(detail.get("retryDelay", "")))
+            if match:
+                return float(match.group(1))
+    return 0.0
 
 
 def json_call(model: str, prompt: str, schema: dict, *, run, purpose: str,
@@ -103,10 +127,12 @@ def json_call(model: str, prompt: str, schema: dict, *, run, purpose: str,
         except genai_errors.APIError as e:
             if e.code != 429 or attempt == config.LLM_MAX_RETRIES - 1:
                 raise
-            wait = min(config.LLM_BACKOFF_CAP_SECONDS,
+            wait = max(_retry_delay(e),
                        config.LLM_BACKOFF_BASE_SECONDS * 2 ** attempt)
+            wait = min(config.LLM_BACKOFF_CAP_SECONDS, wait)
             log.warning("429 from %s (attempt %d/%d): backing off %.1fs",
                         model, attempt + 1, config.LLM_MAX_RETRIES, wait)
+            _buckets[model].penalise(wait)
             time.sleep(wait)
     if response is None:  # pragma: no cover - loop always breaks or raises
         raise LLMError(f"no response from {model} after {config.LLM_MAX_RETRIES} attempts")
@@ -147,8 +173,9 @@ if __name__ == "__main__":
     print(f"cheap model: {CHEAP_MODEL} ({config.MODEL_RPM[CHEAP_MODEL]} RPM)")
     print(f"strong model: {STRONG_MODEL} ({config.MODEL_RPM[STRONG_MODEL]} RPM)")
 
-    # Exercise the limiter on a fake clock: 7 calls at 5 RPM should sail
-    # through the first 5 and wait 12s for each of the next two.
+    # Exercise the limiter on a fake clock. The bucket starts EMPTY and holds
+    # only one token, so 5 calls at 5 RPM are spaced 12s apart with no
+    # opening burst — the provider's window is rolling, not per-batch.
     clock = [0.0]
     waits: list[float] = []
 
@@ -157,9 +184,19 @@ if __name__ == "__main__":
         clock[0] += s
 
     bucket = _TokenBucket(rpm=5, clock=lambda: clock[0], sleep=fake_sleep)
-    for _ in range(7):
+    for _ in range(5):
         bucket.acquire("demo-5rpm")
-    assert len(waits) == 2 and all(abs(w - 12.0) < 1e-6 for w in waits), waits
-    print(f"token bucket: 7 acquisitions -> {len(waits)} waits of "
-          f"{waits[0]:.0f}s each (simulated clock)")
+    assert len(waits) == 5 and all(abs(w - 12.0) < 1e-6 for w in waits), waits
+    assert abs(clock[0] - 60.0) < 1e-6, clock[0]
+    print(f"token bucket: 5 acquisitions at 5 RPM took {clock[0]:.0f}s, "
+          f"no opening burst")
+
+    # A 429 backoff must be charged against the bucket, or the wait silently
+    # refills it and releases a burst the instant it ends.
+    bucket.penalise(30.0)
+    before = clock[0]
+    bucket.acquire("demo-5rpm")
+    assert clock[0] - before >= 30.0, (before, clock[0])
+    print(f"429 penalty honoured: next call waited "
+          f"{clock[0] - before:.0f}s after a 30s backoff")
     print("llm OK (no live call made; json_call needs GEMINI_API_KEY)")

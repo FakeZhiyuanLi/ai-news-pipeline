@@ -27,6 +27,7 @@ ARTIFACT_PRODUCERS: dict[str, str] = {
     "candidates": "find",
     "story": "pick",
     "report": "report",
+    "draft": "draft",
 }
 
 
@@ -82,6 +83,24 @@ def append_jsonl(name: str, entry: dict) -> None:
     path = _resolve(name)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def read_jsonl(name: str) -> list[dict]:
+    path = _resolve(name)
+    if not path.exists():
+        raise MissingDataFileError(f"data file not found: {path}")
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()]
+
+
+def write_text_file(directory: str, filename: str, text: str) -> str:
+    """Write a human-readable report (bench output, README) and return its
+    path. Not a run artifact — those go through Run.write."""
+    target = _resolve(directory)
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / filename
+    path.write_text(text, encoding="utf-8")
+    return str(path.relative_to(PROJECT_ROOT))
 
 
 # --- Runs ------------------------------------------------------------------
