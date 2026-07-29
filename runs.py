@@ -26,6 +26,7 @@ _ARTIFACT_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 ARTIFACT_PRODUCERS: dict[str, str] = {
     "candidates": "find",
     "story": "pick",
+    "report": "report",
 }
 
 
@@ -85,6 +86,13 @@ def append_jsonl(name: str, entry: dict) -> None:
 
 # --- Runs ------------------------------------------------------------------
 
+def all_run_ids() -> list[str]:
+    root = _runs_root()
+    if not root.is_dir():
+        return []
+    return sorted(d.name for d in root.glob("*") if d.is_dir())
+
+
 class Run:
     """One pipeline run: runs/<run_id>/ and everything inside it."""
 
@@ -114,11 +122,10 @@ class Run:
 
     @classmethod
     def latest(cls) -> "Run":
-        root = _runs_root()
-        candidates = sorted(d.name for d in root.glob("*") if d.is_dir()) if root.is_dir() else []
+        candidates = all_run_ids()
         if not candidates:
             raise UnknownRunError("no runs exist yet; start one with: python run.py")
-        return cls(candidates[-1], root)
+        return cls(candidates[-1], _runs_root())
 
     # --- artifacts ---------------------------------------------------------
 

@@ -11,6 +11,7 @@ import sys
 import runs
 import stages.find
 import stages.pick
+import stages.report
 
 log = logging.getLogger("run")
 
@@ -18,6 +19,7 @@ log = logging.getLogger("run")
 STAGES: dict = {
     "find": stages.find.run,
     "pick": stages.pick.run,
+    "report": stages.report.run,
 }
 
 

@@ -78,6 +78,8 @@ def _feed_candidates() -> list[dict]:
     candidates = []
     for src in sources.all_sources():
         feed_url = src["feed_url"]
+        if feed_url is None:
+            continue  # allowlist-only entry (e.g. an image CDN), not a feed
         if not sources.is_allowed(feed_url):
             raise RuntimeError(
                 f"feed for {src['domain']} fails its own allowlist: {feed_url}")
