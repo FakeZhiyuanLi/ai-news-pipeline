@@ -1,0 +1,172 @@
+"""The cheap iteration loop: regenerate drafts over existing reports and read
+them side by side.
+
+Narration is ~97% of marginal cost, so this loop must be structurally unable
+to reach ElevenLabs — not merely uninclined to. _BlockNarration installs a
+meta-path finder that makes the module unimportable for the duration, and any
+attempt fails the bench run loudly.
+
+find, pick, report, narrate and render do not run at all: report.json is
+reused from each run directory. One sample proves nothing, so --variants
+draws K drafts per report and prints them together; the column that matters
+most is which report slots each draft actually used, because a draft using
+two slots has collapsed regardless of how it reads.
+"""
+
+import argparse
+import datetime as _dt
+import logging
+import sys
+
+import config
+import runs
+from stages import draft as draft_stage
+
+log = logging.getLogger("bench")
+
+
+class _BlockNarration:
+    """Make importing a narration SDK impossible while a bench runs."""
+
+    BLOCKED = ("elevenlabs",)
+
+    def find_module(self, fullname, path=None):  # legacy protocol, harmless
+        return None
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".")[0] in self.BLOCKED:
+            raise AssertionError(
+                f"bench attempted to import {fullname!r} — narration is ~97% of "
+                "marginal cost and must never run from the bench loop")
+        return None
+
+    def __enter__(self):
+        for name in self.BLOCKED:
+            if name in sys.modules:
+                raise AssertionError(f"{name!r} was already imported before the bench")
+        sys.meta_path.insert(0, self)
+        return self
+
+    def __exit__(self, *exc):
+        sys.meta_path.remove(self)
+
+
+def _spend_usd(entries: list[dict]) -> float:
+    total = 0.0
+    for entry in entries:
+        price = config.MODEL_PRICE_USD_PER_MTOK.get(entry["model"])
+        if price:
+            total += (entry["tokens"]["input"] * price["input"]
+                      + entry["tokens"]["output"] * price["output"]) / 1_000_000
+    return total
+
+
+def _costs_since(marker: int) -> list[dict]:
+    try:
+        lines = runs.read_jsonl(config.COSTS_FILE)
+    except runs.MissingDataFileError:
+        return []
+    return lines[marker:]
+
+
+def _render_draft(d: dict, label: str) -> list[str]:
+    out = [f"### {label}",
+           "",
+           f"- words: **{d['word_count']}**  |  estimated: **{d['estimated_seconds']}s**"
+           f"  |  beats: **{len(d['beats'])}**",
+           f"- slots used: **{', '.join(d['slots_used'])}**"]
+    if d["dropped_beats"]:
+        out.append(f"- dropped to fit MAX_SECONDS: {[b['slot'] for b in d['dropped_beats']]}")
+    out += ["", "```", d["script_text"], "```", "", "beats:"]
+    out += [f"{i}. `[{b['slot']}]` {b['sentence']}"
+            for i, b in enumerate(d["beats"], 1)]
+    tagged = [b for b in d["beats"] if b["tts_sentence"] != b["sentence"]]
+    out += ["", f"tts tags on {len(tagged)}/{len(d['beats'])} sentences", ""]
+    return out
+
+
+def bench(n: int, variants: int, *, temperature: float, check: bool) -> str:
+    if check:
+        raise SystemExit("--check needs check.py, which does not exist yet")
+
+    run_ids = [r for r in runs.all_run_ids() if runs.Run.resume(r).exists("report")]
+    if not run_ids:
+        raise SystemExit("no run directory has a report artifact yet — "
+                         "run: python run.py --stage report")
+    selected = run_ids[-n:]
+    log.info("benching %d report(s) x %d variant(s)", len(selected), variants)
+
+    marker = len(_costs_since(0))
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime(config.RUN_TIMESTAMP_FORMAT)
+    lines = [f"# bench {stamp}", "",
+             f"{len(selected)} reports x {variants} variants, "
+             f"temperature {temperature}, model {config.CHEAP_MODEL}", ""]
+
+    slot_usage: dict[str, int] = {}
+    drafts_made = 0
+    for run_id in selected:
+        run = runs.Run.resume(run_id)
+        report = run.read("report")
+        available = [s for s in config.REPORT_SLOTS if report["slots"].get(s)]
+        lines += ["---", "",
+                  f"## {report['story']['title']}",
+                  "",
+                  f"`{run_id}`  |  slots available in report: **{', '.join(available)}**",
+                  ""]
+        print(f"\n=== {report['story']['title']}")
+        print(f"    report slots: {', '.join(available)}")
+        for k in range(1, variants + 1):
+            try:
+                d = draft_stage.generate(report, run, temperature=temperature,
+                                         purpose=f"bench-draft-{k}")
+            except Exception as e:
+                lines += [f"### variant {k}", "", f"FAILED: {e.__class__.__name__}: {e}", ""]
+                print(f"    variant {k}: FAILED {e.__class__.__name__}: {e}")
+                continue
+            drafts_made += 1
+            for slot in d["slots_used"]:
+                slot_usage[slot] = slot_usage.get(slot, 0) + 1
+            lines += _render_draft(d, f"variant {k}")
+            print(f"    variant {k}: {len(d['beats'])} beats, {d['word_count']}w, "
+                  f"~{d['estimated_seconds']}s, slots: {', '.join(d['slots_used'])}")
+            print(f"      {d['script_text']}")
+
+    spend = _spend_usd(_costs_since(marker))
+    summary = [f"- drafts: {drafts_made}",
+               f"- slot usage across drafts: "
+               f"{', '.join(f'{s}={n}' for s, n in sorted(slot_usage.items())) or 'none'}",
+               f"- spend: ${spend:.5f}"]
+    lines += ["---", "", "## totals", ""] + summary + [""]
+    print("\n" + "\n".join(summary))
+
+    assert spend < config.BENCH_MAX_SPEND_USD, (
+        f"bench spent ${spend:.5f}, over the ${config.BENCH_MAX_SPEND_USD} ceiling")
+
+    path = runs.write_text_file(config.BENCH_DIR, f"{stamp}.md", "\n".join(lines))
+    print(f"\nwrote {path}")
+    return path
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="bench.py", description="regenerate drafts over existing reports")
+    parser.add_argument("--bench", type=int, default=3, metavar="N",
+                        help="how many existing run directories to draft over")
+    parser.add_argument("--variants", type=int, default=2, metavar="K",
+                        help="drafts per report; one sample proves nothing")
+    parser.add_argument("--temperature", type=float, default=0.7)
+    parser.add_argument("--check", action="store_true",
+                        help="also check each draft (needs check.py; off by default "
+                             "because the strong model at 5 RPM makes this slow)")
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
+                        format="%(levelname)s %(name)s: %(message)s")
+
+    with _BlockNarration():
+        bench(args.bench, args.variants, temperature=args.temperature, check=args.check)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

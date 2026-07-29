@@ -46,6 +46,51 @@ IMAGE_DIM_FETCH_BYTES = 32768  # enough for PNG/GIF/WebP headers and JPEG SOF
 
 REPORT_SLOTS = ("lede", "so_what", "numbers", "scale_anchor", "quote", "tension")
 
+# --- Drafting --------------------------------------------------------------
+
+# ElevenLabs v3 audio tags permitted in tts_text. Anything bracketed that is
+# not on this list is stripped: stripping bracketed spans from tts_text must
+# yield script_text exactly.
+AUDIO_TAGS = ("[pause]", "[short pause]", "[excited]", "[curious]",
+              "[serious]", "[dry]", "[emphatic]", "[thoughtful]")
+MAX_TAGS_PER_SENTENCE = 1
+
+# Hooks tease the story. None promises a duration — with dynamic length that
+# is a claim the script cannot guarantee. Chosen pseudo-randomly, seeded on
+# run_id, so a run is reproducible.
+HOOKS = (
+    "Here's what just happened.",
+    "This one is worth your attention.",
+    "Something changed today.",
+    "You're going to hear about this one.",
+    "Pay attention to this.",
+    "Here's the story.",
+    "This landed today.",
+    "Worth knowing about.",
+    "Here's what's new.",
+    "This is the one to watch.",
+)
+
+# Wire-copy constructions the writer must not produce. Each entry is a regex
+# checked against script_text, with a human-readable label for the failure.
+BANNED_PATTERNS = (
+    (r"\b[A-Z][\w.&-]*(?:\s+[A-Z][\w.&-]*)?\s+(?:announced|unveiled|released|launched)\b",
+     "company name followed by announced/unveiled/released/launched"),
+    (r"\bdesigned to\b", '"designed to"'),
+    (r"\blet's dive in\b", '"let\'s dive in"'),
+    (r"\b(?:like|share|subscribe|follow (?:us|me)|comment below|link in bio)\b",
+     "call to action"),
+    (r"\b(?:thanks for watching|see you tomorrow|that's all for today|"
+     r"stay tuned|until next time)\b", "sign-off"),
+)
+
+# Superlatives are permitted ONLY inside a quotation attributed to a named
+# speaker; checked outside quoted spans.
+SUPERLATIVE_PATTERN = (
+    r"\b(?:best|worst|biggest|largest|smallest|fastest|slowest|greatest|"
+    r"first-ever|unprecedented|revolutionary|groundbreaking|industry-leading|"
+    r"game-changing|world-class|cutting-edge|state-of-the-art)\b")
+
 # --- Models ----------------------------------------------------------------
 
 CHEAP_MODEL = "gemini-3.5-flash-lite"
@@ -58,6 +103,15 @@ DEFAULT_TEMPERATURE = 0.2
 LLM_MAX_RETRIES = 5  # attempts on 429 before giving up
 LLM_BACKOFF_BASE_SECONDS = 2.0
 LLM_BACKOFF_CAP_SECONDS = 60.0
+
+# --- Bench -----------------------------------------------------------------
+
+BENCH_DIR = "data/bench"
+BENCH_MAX_SPEND_USD = 0.01  # a bench run costing more than a cent is a bug
+MODEL_PRICE_USD_PER_MTOK = {  # published list prices, for the spend assert
+    CHEAP_MODEL: {"input": 0.10, "output": 0.40},
+    STRONG_MODEL: {"input": 0.30, "output": 2.50},
+}
 
 # --- Files and directories (relative to the project root) ------------------
 

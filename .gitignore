@@ -1,6 +1,29 @@
+# Secrets — never commit; .env was committed once already and had to be removed
+.env
+.env.*
+
+# Python
 .venv/
 __pycache__/
+*.py[cod]
 .pytest_cache/
+
+# Pipeline output. Run directories are the unit of work and are disposable;
+# costs.jsonl and the ledger are local state that would conflict on every run.
 runs/
 costs.jsonl
-.env
+ledger.json
+
+# Bench output: regenerated on demand, one file per invocation
+data/bench/
+
+# Rendered media
+*.mp3
+*.mp4
+*.wav
+
+# OS and editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
