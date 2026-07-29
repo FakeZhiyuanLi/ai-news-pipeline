@@ -33,4 +33,6 @@ def test_trailing_dot_and_case_normalised():
 
 def test_every_feed_url_passes_its_own_allowlist():
     for entry in sources.all_sources():
+        if entry["feed_url"] is None:
+            continue  # allowlist-only entry, nothing to fetch as a feed
         assert sources.is_allowed(entry["feed_url"]), entry["domain"]
