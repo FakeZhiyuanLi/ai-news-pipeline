@@ -48,6 +48,8 @@ def allowed_domains() -> list[str]:
 
 
 def is_allowed(url: str) -> bool:
+    if not url:
+        return False
     try:
         parts = urlsplit(url)
     except ValueError:

@@ -32,10 +32,24 @@ SUMMARY_MAX_CHARS = 1000  # stored per candidate, HTML stripped
 RANK_SUMMARY_CHARS = 400  # how much of the summary the ranking model sees
 RANK_MAX_SCORE = 10
 
+# --- Reporting (article fetch + slot extraction) ---------------------------
+
+FETCH_TIMEOUT_SECONDS = 20
+HTTP_USER_AGENT = "Mozilla/5.0 (compatible; HyperFeed/0.1)"
+MIN_ARTICLE_CHARS = 400  # less than this means extraction failed, not a short article
+
+MIN_IMAGE_DIM_PX = 200  # reject anything smaller on either axis
+# Site-chrome filename patterns, matched against the lowercased URL path.
+IMAGE_REJECT_PATTERNS = ("presence", "frame", "og-image", "social", "thumbnail", "_1x1")
+MAX_IMAGE_DIM_FETCHES = 12  # budget for fetching image bytes when markup omits dims
+IMAGE_DIM_FETCH_BYTES = 32768  # enough for PNG/GIF/WebP headers and JPEG SOF
+
+REPORT_SLOTS = ("lede", "so_what", "numbers", "scale_anchor", "quote", "tension")
+
 # --- Models ----------------------------------------------------------------
 
 CHEAP_MODEL = "gemini-3.5-flash-lite"
-STRONG_MODEL = "gemini-3.6"
+STRONG_MODEL = "gemini-3.6-flash"  # "gemini-3.6" does not exist on the API; this does
 MODEL_RPM = {
     CHEAP_MODEL: 15,
     STRONG_MODEL: 5,
