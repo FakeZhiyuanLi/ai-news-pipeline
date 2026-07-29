@@ -25,6 +25,14 @@
       "slot_yield": {}
     },
     {
+      "domain": "cdn.arstechnica.net",
+      "feed_url": null,
+      "name": "Ars Technica image CDN (fetch-only, no feed)",
+      "added_by": "report-stage finding",
+      "added_at": "2026-07-27",
+      "slot_yield": {}
+    },
+    {
       "domain": "arstechnica.com",
       "feed_url": "https://arstechnica.com/ai/feed/",
       "name": "Ars Technica AI",

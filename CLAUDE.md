@@ -74,6 +74,11 @@ rather than trusting the HTML.
 **Never estimate word timing from character counts.** Real per-word timings come from
 the ElevenLabs alignment and are in the payload.
 
+**Publisher images live on sibling CDN domains.** arstechnica.com serves article
+images from cdn.arstechnica.net; with only the article domain allowlisted, every
+image needing a header fetch for dimensions was denied and image yield silently
+dropped. sources.json entries with `feed_url: null` are allowlist-only for this.
+
 **Strip `www.` before matching feed URLs against HN URLs.** The Verge's feed links to
 `www.theverge.com`, HN submitters usually drop the `www`, and exact-host matching
 silently zeroes the HN signal for that entire source.
