@@ -74,6 +74,17 @@ rather than trusting the HTML.
 **Never estimate word timing from character counts.** Real per-word timings come from
 the ElevenLabs alignment and are in the payload.
 
+**The writer puts audio tags in the clean field too.** Asked for a clean sentence and
+a tagged one, the model returned `[pause]` in both, so comparing them found no
+mismatch and a literal "[pause]" reached `script_text` — subtitles and TTS input.
+Strip bracketed spans from *both* fields; never trust the clean field to be clean.
+
+**A token bucket must start empty and hold one token, not `rpm`.** A full bucket
+released 15 calls in the first second against a rolling per-minute quota and earned
+an immediate 429. Charge the 429 backoff against the bucket too, or the wait refills
+it and the burst repeats the moment the sleep ends. Honour the provider's `RetryInfo`
+delay over any local guess — the real quota may not match the configured RPM.
+
 **Publisher images live on sibling CDN domains.** arstechnica.com serves article
 images from cdn.arstechnica.net; with only the article domain allowlisted, every
 image needing a header fetch for dimensions was denied and image yield silently
