@@ -1,6 +1,9 @@
-# Secrets — never commit; .env was committed once already and had to be removed
+# Secrets — never commit; .env was committed once already and had to be removed.
+# .env.example is the opposite: it carries no values and documents which keys
+# a new checkout needs, so it must stay tracked.
 .env
 .env.*
+!.env.example
 
 # Python
 .venv/
@@ -14,7 +17,9 @@ runs/
 costs.jsonl
 ledger.json
 
-# Bench output: regenerated on demand, one file per invocation
+# Bench output: regenerated on demand, one file per invocation.
+# tests/fixtures/ is deliberately NOT ignored — run.py --selftest replays
+# those recorded responses, so they are source, not output.
 data/bench/
 
 # Rendered media
