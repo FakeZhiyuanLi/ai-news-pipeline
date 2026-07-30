@@ -36,6 +36,7 @@ import config
 import llm
 from checks import numbers as number_checks
 from checks import prose
+from checks import sentences
 
 log = logging.getLogger(__name__)
 
@@ -191,33 +192,9 @@ and say it plainly.
 
 # --- sentence splitting ----------------------------------------------------
 
-# A period is a boundary only when whitespace follows it. A period with no
-# whitespace after it is inside an identifier or a number: "torch.compile"
-# and "3.5" must not split, and scripts in this niche legitimately begin
-# sentences with torch.compile, npm, pip — so capitalisation is never used.
-_ABBREVIATIONS = ("u.s.", "e.g.", "i.e.", "inc.", "vs.", "dr.", "mr.", "ms.",
-                  "st.", "jr.", "sr.", "etc.", "fig.", "approx.")
-
-# A terminator, any closing quote/bracket that trails it, then whitespace.
-# The boundary falls AFTER the closing mark so a sentence-final quotation
-# stays with the sentence it closes.
-_BOUNDARY_RE = re.compile(r'[.!?]["\'”’)\]]*(?=\s)')
-
-
-def split_sentences(text: str) -> list[str]:
-    sentences: list[str] = []
-    start = 0
-    for match in _BOUNDARY_RE.finditer(text):
-        end = match.end()
-        candidate = text[start:end]
-        last_word = candidate.split()[-1].lower() if candidate.split() else ""
-        if last_word in _ABBREVIATIONS:
-            continue  # "in the U.S. last year" is not a boundary
-        sentences.append(candidate)
-        start = end
-    if text[start:].strip():
-        sentences.append(text[start:])
-    return [s.strip() for s in sentences if s.strip()]
+# Shared with claims.py: the checker must see exactly the sentences the writer
+# produced, or a claim can be judged against text that was never a sentence.
+split_sentences = sentences.split
 
 
 # --- tts tags --------------------------------------------------------------
@@ -484,8 +461,21 @@ def evaluate(draft: dict, slots: dict) -> None:
 
 # --- generation ------------------------------------------------------------
 
+_FORBIDDEN_PREAMBLE = """\
+CHECKING REJECTED THESE CLAIMS. The article does not support them. Do not
+write them, and do not write anything that implies them:
+
+{forbidden}
+
+Write the story from what the notes DO support. If dropping one costs you a
+beat, the script is simply shorter — that is a correct result.
+
+"""
+
+
 def generate(report: dict, run, *, temperature: float = config.DRAFT_TEMPERATURE,
-             label: str | None = None) -> dict:
+             label: str | None = None,
+             forbidden: list[str] | None = None) -> dict:
     """Write the script, retrying once if a deterministic gate rejects it.
 
     Two failures in a row is a signal worth seeing — it means the prompt has
@@ -500,6 +490,9 @@ def generate(report: dict, run, *, temperature: float = config.DRAFT_TEMPERATURE
         tags=", ".join(config.AUDIO_TAGS),
         context=_context_for_prompt(slots, report["story"]),
         notes=_notes_for_prompt(slots))
+    if forbidden:
+        base_prompt = _FORBIDDEN_PREAMBLE.format(
+            forbidden="\n".join(f"  - {c}" for c in forbidden)) + base_prompt
 
     prompt = base_prompt
     last_error: DraftRejected | None = None

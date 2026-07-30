@@ -122,6 +122,10 @@ API_KEY_ENV = "FIREWORKS_API_KEY"
 KIMI = "accounts/fireworks/models/kimi-k2p6"
 DEEPSEEK_PRO = "accounts/fireworks/models/deepseek-v4-pro"
 GLM = "accounts/fireworks/models/glm-5p2"
+# Candidate writers, priced so `bench.py --draft-model` reports real spend
+# rather than a silent $0.
+KIMI_K3 = "accounts/fireworks/models/kimi-k3"
+DEEPSEEK_FLASH = "accounts/fireworks/models/deepseek-v4-flash"
 
 # purpose -> (model, reasoning_effort). Three families, deliberately: check
 # judges draft's output and re-queries report's extraction, so it must not
@@ -134,7 +138,11 @@ MODELS = {
     "rank": (KIMI, "low"),             # judgment measurably changes the ordering
     "report": (DEEPSEEK_PRO, "high"),  # 1M context, cached-input discount, judgment
     "draft": (KIMI, "none"),           # prose from ranked notes; reasoning bought nothing
-    "check": (GLM, "high"),            # highest intelligence, a third family
+    # "high" made GLM spend all 32,768 output tokens deliberating a single
+    # judgment claim and truncate mid-JSON. "medium" returns identical
+    # verdicts in ~340 tokens — entailment is a bounded question and extra
+    # reasoning finds nothing, it only finds more to say.
+    "check": (GLM, "medium"),          # highest intelligence, a third family
 }
 
 # USD per million tokens. Maintained by hand like REFERENCE_SCALES: a price
@@ -146,13 +154,17 @@ PRICES = {
                    "as_of": "2026-07-29", "source": "Fireworks published pricing page"},
     GLM: {"input": 0.60, "output": 2.20, "cached_input": 0.06,
           "as_of": "2026-07-29", "source": "Fireworks published pricing page"},
+    KIMI_K3: {"input": 0.60, "output": 2.50, "cached_input": 0.06,
+              "as_of": "2026-07-30", "source": "Fireworks published pricing page"},
+    DEEPSEEK_FLASH: {"input": 0.27, "output": 1.10, "cached_input": 0.03,
+                     "as_of": "2026-07-30", "source": "Fireworks published pricing page"},
 }
 
 DEFAULT_TEMPERATURE = 0.2
 # Reasoning tokens count against this budget and are billed as output. "rank"
 # looks trivial but scales with candidate count — 34 fresh candidates
 # truncated a 4096-token ceiling mid-JSON — so every ceiling here is generous.
-MAX_TOKENS = {"rank": 32768, "report": 32768, "draft": 16384, "check": 32768}
+MAX_TOKENS = {"rank": 32768, "report": 32768, "draft": 16384, "check": 65536}
 DEFAULT_MAX_TOKENS = 16384
 
 LLM_MAX_RETRIES = 5

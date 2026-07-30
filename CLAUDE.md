@@ -90,6 +90,11 @@ rather than assuming: it produced byte-comparable drafts at 1/27th the cost, but
 reordered the ranking, so `rank` keeps its reasoning and `draft` does not. GLM and
 DeepSeek accept the same efforts; `"minimal"` is rejected by all three.
 
+**Higher reasoning effort made the checker worse, not just dearer.** GLM at `high`
+spent all 32,768 output tokens deliberating one judgment claim and truncated mid-JSON;
+at `medium` it returned identical verdicts in ~340 tokens. Entailment is a bounded
+question — extra reasoning finds nothing further, it only finds more to say.
+
 **A "trivial" call is not a small one.** Rank — one score per candidate — truncated a
 4096-token ceiling mid-JSON at 34 candidates, because reasoning is spent before the
 first output token. Size `MAX_TOKENS` for the reasoning, not the answer.
