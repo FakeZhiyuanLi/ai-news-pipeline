@@ -1,202 +1,208 @@
 """All model calls. The ONLY module that imports a model SDK.
 
-Stages call json_call() and get parsed JSON back; swapping model or provider
-touches this file alone. Rate limits are the main failure mode, so every call
-goes through a per-model token bucket sized to the real RPM, waits are logged
-(stalls should be visible, not mysterious), and 429s back off exponentially.
+Stages call json_call() with a PURPOSE — "rank", "report", "draft", "check" —
+never a model name. config.MODELS maps purpose to (model, reasoning_effort),
+so re-pointing a stage at a different model is a config edit and no stage
+changes.
+
+The client is built from base_url + model + key and knows nothing about any
+particular vendor. A self-hosted vLLM or SGLang deployment exposes the same
+OpenAI-compatible interface, so migrating off a hosted provider is a change
+to config.BASE_URL and the slugs, and nothing more.
 
 Every call leaves two traces:
-  - one line in costs.jsonl (timestamp, run_id, model, tokens, purpose)
+  - one line in costs.jsonl (timestamp, run_id, purpose, model, tokens, cost)
   - the full prompt and raw response in runs/<run_id>/llm/<NN>-<purpose>.json,
     so a bad script can be traced to the exact prompt that produced it.
 
-Uses google-genai (the current SDK, v2.x). Structured output is requested via
-GenerateContentConfig(response_json_schema=...), which takes a plain JSON
-Schema dict — unlike the legacy google-generativeai SDK's generation_config.
+Prompt caching is automatic on repeated prefixes, so the stable instructions
+go in a system message and the per-run material in the user message. The
+cached fraction is reported in usage and costed at the cached rate.
 """
 
 import datetime as _dt
 import json
 import logging
-import re
+import os
 import time
 
-from google import genai
-from google.genai import errors as genai_errors
-from google.genai import types as genai_types
+import openai
 
 import config
 import runs
 
 log = logging.getLogger(__name__)
 
-CHEAP_MODEL = config.CHEAP_MODEL
-STRONG_MODEL = config.STRONG_MODEL
-
-_client_instance: genai.Client | None = None
+_client_instance: openai.OpenAI | None = None
 
 
 class LLMError(RuntimeError):
     """A model call failed after retries, or returned unusable output."""
 
 
-def _client() -> genai.Client:
+def _client() -> openai.OpenAI:
     global _client_instance
     if _client_instance is None:
-        _client_instance = genai.Client()  # key from GEMINI_API_KEY / GOOGLE_API_KEY
+        key = os.environ.get(config.API_KEY_ENV)
+        if not key:
+            raise LLMError(f"{config.API_KEY_ENV} is not set; add it to .env")
+        _client_instance = openai.OpenAI(base_url=config.BASE_URL, api_key=key)
     return _client_instance
 
 
-class _TokenBucket:
-    """Refills at rpm/60 tokens per second; acquire() blocks until a token
-    is available and logs how long it waited.
-
-    Starts EMPTY and holds capacity 1. The provider enforces a rolling
-    per-minute window, so a full bucket would let 15 calls through in the
-    first second and earn an immediate 429 — the burst allowance a classic
-    token bucket grants is exactly wrong here."""
-
-    def __init__(self, rpm: int, clock=time.monotonic, sleep=time.sleep):
-        self.rate = rpm / 60.0
-        self.capacity = 1.0
-        self.tokens = 0.0
-        self._clock = clock
-        self._sleep = sleep
-        self._updated = clock()
-
-    def _refill(self) -> None:
-        now = self._clock()
-        self.tokens = min(self.capacity, self.tokens + (now - self._updated) * self.rate)
-        self._updated = now
-
-    def acquire(self, label: str) -> None:
-        self._refill()
-        if self.tokens < 1.0:
-            wait = (1.0 - self.tokens) / self.rate
-            log.info("rate limit: waiting %.1fs for a %s slot", wait, label)
-            self._sleep(wait)
-            self._refill()
-        self.tokens -= 1.0
-
-    def penalise(self, seconds: float) -> None:
-        """Charge a 429 backoff against the bucket, so the wait does not
-        silently refill it and release a burst the moment it ends."""
-        self.tokens = min(self.tokens, 0.0) - seconds * self.rate
+def _resolve(purpose: str) -> tuple[str, str]:
+    try:
+        return config.MODELS[purpose]
+    except KeyError:
+        raise LLMError(
+            f"unknown purpose {purpose!r}; config.MODELS defines "
+            f"{sorted(config.MODELS)}") from None
 
 
-_buckets = {model: _TokenBucket(rpm) for model, rpm in config.MODEL_RPM.items()}
+def cost_usd(model: str, tokens: dict) -> float:
+    """Price one call from config.PRICES, charging the cached fraction of the
+    input at the cached rate."""
+    price = config.PRICES.get(model)
+    if not price:
+        return 0.0
+    cached = tokens.get("cached_input", 0)
+    fresh_input = max(0, tokens["input"] - cached)
+    return round((fresh_input * price["input"]
+                  + cached * price["cached_input"]
+                  + tokens["output"] * price["output"]) / 1_000_000, 8)
 
 
-def _retry_delay(error) -> float:
-    """The provider states how long to wait in RetryInfo; honouring it beats
-    guessing, because our RPM assumption can be wrong (a free-tier quota is
-    per project, not per client)."""
-    details = getattr(error, "details", None) or {}
-    for detail in (details.get("error", {}).get("details") or []):
-        if detail.get("@type", "").endswith("RetryInfo"):
-            match = re.fullmatch(r"(\d+(?:\.\d+)?)s", str(detail.get("retryDelay", "")))
-            if match:
-                return float(match.group(1))
-    return 0.0
+def _usage_tokens(usage) -> dict:
+    details = getattr(usage, "prompt_tokens_details", None)
+    return {
+        "input": getattr(usage, "prompt_tokens", 0) or 0,
+        "output": getattr(usage, "completion_tokens", 0) or 0,
+        "total": getattr(usage, "total_tokens", 0) or 0,
+        "cached_input": (getattr(details, "cached_tokens", 0) or 0) if details else 0,
+    }
 
 
-def json_call(model: str, prompt: str, schema: dict, *, run, purpose: str,
-              temperature: float = config.DEFAULT_TEMPERATURE):
-    """Make one structured-output call and return the parsed JSON.
+def _is_retryable(error: Exception) -> bool:
+    status = getattr(error, "status_code", None)
+    return status == 429 or (status is not None and 500 <= status < 600) \
+        or isinstance(error, (openai.APIConnectionError, openai.APITimeoutError))
 
-    schema is a plain JSON Schema dict. run is the current runs.Run — it
-    receives the full transcript; the costs ledger gets one line.
+
+def json_call(purpose: str, prompt: str, schema: dict, *, run,
+              temperature: float = config.DEFAULT_TEMPERATURE,
+              system: str | None = None, label: str | None = None):
+    """Make one structured-output call for `purpose` and return parsed JSON.
+
+    purpose selects the model via config.MODELS. label only names the
+    transcript file — callers making several calls for one purpose (bench
+    variants, check retries) pass it to keep the transcripts apart, and it
+    never affects which model runs.
+
+    schema is a plain JSON Schema dict, sent as a strict json_schema response
+    format — NOT json_object, which means "any valid JSON" and silently drops
+    schema enforcement while finish_reason stays "stop".
     """
-    if model not in _buckets:
-        raise LLMError(f"unknown model {model!r}; known: {sorted(_buckets)}")
+    model, effort = _resolve(purpose)
+    max_tokens = config.MAX_TOKENS.get(purpose, config.DEFAULT_MAX_TOKENS)
+    messages = []
+    if system:
+        # Stable prefix first: prompt caching keys on the leading tokens.
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
 
     response = None
     for attempt in range(config.LLM_MAX_RETRIES):
-        _buckets[model].acquire(model)
         try:
-            response = _client().models.generate_content(
+            response = _client().chat.completions.create(
                 model=model,
-                contents=prompt,
-                config=genai_types.GenerateContentConfig(
-                    temperature=temperature,
-                    response_mime_type="application/json",
-                    response_json_schema=schema,
-                ),
+                messages=messages,
+                response_format={"type": "json_schema",
+                                 "json_schema": {"name": purpose.replace("-", "_"),
+                                                 "schema": schema}},
+                reasoning_effort=effort,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
             break
-        except genai_errors.APIError as e:
-            if e.code != 429 or attempt == config.LLM_MAX_RETRIES - 1:
+        except Exception as e:
+            if not _is_retryable(e) or attempt == config.LLM_MAX_RETRIES - 1:
                 raise
-            wait = max(_retry_delay(e),
+            wait = min(config.LLM_BACKOFF_CAP_SECONDS,
                        config.LLM_BACKOFF_BASE_SECONDS * 2 ** attempt)
-            wait = min(config.LLM_BACKOFF_CAP_SECONDS, wait)
-            log.warning("429 from %s (attempt %d/%d): backing off %.1fs",
-                        model, attempt + 1, config.LLM_MAX_RETRIES, wait)
-            _buckets[model].penalise(wait)
+            log.warning("%s from %s (attempt %d/%d): backing off %.1fs",
+                        getattr(e, "status_code", type(e).__name__), model,
+                        attempt + 1, config.LLM_MAX_RETRIES, wait)
             time.sleep(wait)
     if response is None:  # pragma: no cover - loop always breaks or raises
         raise LLMError(f"no response from {model} after {config.LLM_MAX_RETRIES} attempts")
 
-    usage = response.usage_metadata
-    tokens = {
-        "input": getattr(usage, "prompt_token_count", None) or 0,
-        "output": getattr(usage, "candidates_token_count", None) or 0,
-        "total": getattr(usage, "total_token_count", None) or 0,
-    }
-    transcript_path = run.write_llm_log(purpose, {
-        "model": model,
+    choice = response.choices[0]
+    tokens = _usage_tokens(response.usage)
+    cost = cost_usd(model, tokens)
+    transcript_path = run.write_llm_log(label or purpose, {
         "purpose": purpose,
+        "model": model,
+        "reasoning_effort": effort,
         "temperature": temperature,
+        "max_tokens": max_tokens,
+        "system": system,
         "prompt": prompt,
         "schema": schema,
-        "response_text": response.text,
+        "finish_reason": choice.finish_reason,
+        "response_text": choice.message.content,
+        "reasoning_content": getattr(choice.message, "reasoning_content", None),
         "tokens": tokens,
+        "cost_usd": cost,
     })
     runs.append_jsonl(config.COSTS_FILE, {
         "timestamp": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "run_id": run.run_id,
+        "purpose": purpose,
         "model": model,
         "tokens": tokens,
-        "purpose": purpose,
+        "cost_usd": cost,
     })
 
+    # Truncated output is invalid JSON, and the failure is worth naming
+    # precisely: it means max_tokens was too small, not that the model erred.
+    if choice.finish_reason == "length":
+        raise LLMError(
+            f"{model} hit the {max_tokens}-token ceiling for {purpose!r} and was "
+            f"truncated mid-output (transcript: {transcript_path}). Raise "
+            f"config.MAX_TOKENS[{purpose!r}] — reasoning tokens count against it.")
+
     try:
-        return json.loads(response.text)
+        return json.loads(choice.message.content)
     except (TypeError, json.JSONDecodeError) as e:
         raise LLMError(
             f"{model} returned non-JSON for {purpose!r} "
-            f"(transcript: {transcript_path}): {e}") from e
+            f"(finish_reason={choice.finish_reason}, transcript: {transcript_path}): {e}"
+        ) from e
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    print(f"cheap model: {CHEAP_MODEL} ({config.MODEL_RPM[CHEAP_MODEL]} RPM)")
-    print(f"strong model: {STRONG_MODEL} ({config.MODEL_RPM[STRONG_MODEL]} RPM)")
 
-    # Exercise the limiter on a fake clock. The bucket starts EMPTY and holds
-    # only one token, so 5 calls at 5 RPM are spaced 12s apart with no
-    # opening burst — the provider's window is rolling, not per-batch.
-    clock = [0.0]
-    waits: list[float] = []
+    print(f"base_url: {config.BASE_URL}")
+    for purpose, (model, effort) in config.MODELS.items():
+        price = config.PRICES[model]
+        print(f"  {purpose:7} -> {model.split('/')[-1]:16} effort={effort:4} "
+              f"${price['input']}/${price['output']} per Mtok "
+              f"(cached ${price['cached_input']}, as of {price['as_of']})")
 
-    def fake_sleep(s):
-        waits.append(s)
-        clock[0] += s
+    # Every model in MODELS must be priced, or costs.jsonl silently under-reports.
+    for purpose, (model, _) in config.MODELS.items():
+        assert model in config.PRICES, f"no price for {model} ({purpose})"
 
-    bucket = _TokenBucket(rpm=5, clock=lambda: clock[0], sleep=fake_sleep)
-    for _ in range(5):
-        bucket.acquire("demo-5rpm")
-    assert len(waits) == 5 and all(abs(w - 12.0) < 1e-6 for w in waits), waits
-    assert abs(clock[0] - 60.0) < 1e-6, clock[0]
-    print(f"token bucket: 5 acquisitions at 5 RPM took {clock[0]:.0f}s, "
-          f"no opening burst")
+    tokens = {"input": 10_000, "output": 1_000, "cached_input": 9_000, "total": 11_000}
+    expected = (1_000 * 1.25 + 9_000 * 0.10 + 1_000 * 5.00) / 1_000_000
+    assert abs(cost_usd(config.DEEPSEEK_PRO, tokens) - expected) < 1e-9
+    print(f"\ncosting with 90% cache hit: ${cost_usd(config.DEEPSEEK_PRO, tokens):.6f} "
+          f"(vs ${cost_usd(config.DEEPSEEK_PRO, dict(tokens, cached_input=0)):.6f} uncached)")
 
-    # A 429 backoff must be charged against the bucket, or the wait silently
-    # refills it and releases a burst the instant it ends.
-    bucket.penalise(30.0)
-    before = clock[0]
-    bucket.acquire("demo-5rpm")
-    assert clock[0] - before >= 30.0, (before, clock[0])
-    print(f"429 penalty honoured: next call waited "
-          f"{clock[0] - before:.0f}s after a 30s backoff")
-    print("llm OK (no live call made; json_call needs GEMINI_API_KEY)")
+    try:
+        _resolve("nonexistent")
+    except LLMError as e:
+        print(f"unknown purpose rejected: {e}")
+    print("llm OK (no live call made; json_call needs "
+          f"{config.API_KEY_ENV})")

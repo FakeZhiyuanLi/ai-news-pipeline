@@ -49,9 +49,12 @@ exactly one sentence.
 
 Order the beats:
   1. the lede — the most consequential thing, and the story's way in
-  2. proof beats — the ranked numbers, and the quote if there is one, in the
+  2. why it matters — the "why it matters" note, in your own words, as the
+     second sentence. This is the beat that makes someone keep watching, so
+     it is required whenever the notes carry one. Use slot "so_what".
+  3. proof beats — the ranked numbers, and the quote if there is one, in the
      order given; the scale anchor if present belongs beside its number
-  3. the catch — the tension, last
+  4. the catch — the tension, last
 
 Rules that decide whether this script is correct:
 
@@ -62,6 +65,18 @@ Rules that decide whether this script is correct:
 - Where there is no tension in the notes, the script simply ends after the
   last proof beat. Do not invent a catch.
 - There is no target length. Do not aim for any number of sentences.
+
+The notes are reporting material, not a list to read out. You are choosing
+what to tell someone in a hurry:
+
+- AT MOST {max_proof} proof beats, and fewer is usually better. The notes are
+  ranked, so the ones worth using come first — take what earns its place and
+  stop. Leaving good material unused is normal and correct.
+- Include a number only if a viewer would repeat it to someone else. A
+  measurement threshold, an internal tool name, a unit only a specialist
+  tracks, or a figure that merely sizes the study is detail, not a beat —
+  drop it, even though it is in the notes.
+- If two numbers make the same point, use the stronger one only.
 
 You may exercise judgment in exactly three places, and nowhere else:
   1. WHICH FACT LEADS — e.g. leading with the price cut rather than the
@@ -75,11 +90,24 @@ worry their competitors" is framing and is allowed only if the notes state
 the competitive stake; "this will fail" is not.
 
 Never write:
-- a company name followed by announced, unveiled, released or launched (write
-  what the thing does or costs instead)
+- a company name followed by announced, unveiled, released or launched. The
+  release is not the news; what the thing does or costs is. Write "Opus 5
+  costs five dollars per million input tokens", never "Anthropic released
+  Opus 5". This applies even when the release IS the story — lead with the
+  substance and let the company appear where it belongs.
 - the phrase "designed to"
 - any superlative that is not inside a quotation from a named person
 - sign-offs, calls to action, or "let's dive in"
+- the words "quote" and "unquote" as narration. Attribute a quotation the way
+  a person speaking aloud would: "As Keri Powell put it, ..." — never "quote,
+  ... unquote".
+- a speaker's full title in front of their name. "As Keri Powell, an attorney
+  at the Southern Environmental Law Center, put it" is speakable; "As
+  Atlanta-based attorney at the environmental legal advocacy group Southern
+  Environmental Law Center Keri Powell put it" is not.
+
+Read every sentence back as speech before you emit it. It must be
+grammatical and it must be sayable in one breath by a narrator.
 
 Two versions of every sentence:
 - sentence: clean text. No brackets, no tags. This is what appears as
@@ -170,7 +198,8 @@ def _notes_for_prompt(slots: dict) -> str:
     if slots.get("lede"):
         lines.append(f"lede: {slots['lede']}")
     if slots.get("so_what"):
-        lines.append(f"why it matters: {slots['so_what']}")
+        lines.append(f"why it matters (required as the second beat): "
+                     f"{slots['so_what']}")
     for i, number in enumerate(slots.get("numbers") or [], 1):
         lines.append(f"number {i} (ranked): {number}")
     anchor = slots.get("scale_anchor")
@@ -192,17 +221,45 @@ def estimate_seconds(text: str) -> float:
     return round(len(text.split()) / config.WORDS_PER_SECOND, 1)
 
 
+# Beats that carry the story and are never dropped: the way in, the reason to
+# care, and the catch.
+_STRUCTURAL_SLOTS = ("lede", "so_what", "tension")
+
+
 def _truncate_to_budget(beats: list[dict]) -> tuple[list[dict], list[dict]]:
-    """Drop from the bottom of the ranked proof beats — never the lede, never
-    the catch — until the running estimate fits MAX_SECONDS."""
+    """Drop from the bottom of the ranked proof beats — never the lede, the
+    so_what or the catch — until the script is within both MAX_PROOF_BEATS
+    and MAX_SECONDS.
+
+    The proof cap is enforced here as well as asked for in the prompt: the
+    notes are ranked, so dropping from the bottom keeps the beats that earned
+    their place, and a model that recites the whole list still yields a
+    watchable script."""
     kept, dropped = list(beats), []
+
+    def proof_indices():
+        return [i for i, b in enumerate(kept) if b["slot"] not in _STRUCTURAL_SLOTS]
+
+    while len(proof_indices()) > config.MAX_PROOF_BEATS:
+        dropped.append(kept.pop(proof_indices()[-1]))
     while estimate_seconds(" ".join(b["sentence"] for b in kept)) > config.MAX_SECONDS:
-        droppable = [i for i, b in enumerate(kept)
-                     if b["slot"] not in ("lede", "tension")]
+        droppable = proof_indices()
         if not droppable:
-            break  # lede plus catch alone exceed the cap: report it, don't mangle it
+            break  # structure alone exceeds the cap: report it, don't mangle it
         dropped.append(kept.pop(droppable[-1]))
     return kept, dropped
+
+
+def find_banned(script_text: str) -> list[str]:
+    """Wire-copy constructions, checked deterministically. Reported on the
+    artifact rather than raised: this stage is unconstrained by design, and
+    check.py decides what is fatal."""
+    found = [label for pattern, label in config.BANNED_PATTERNS
+             if re.search(pattern, script_text, re.IGNORECASE)]
+    outside_quotes = re.sub(r'"[^"]*"', " ", script_text)
+    if re.search(config.SUPERLATIVE_PATTERN, outside_quotes, re.IGNORECASE):
+        found.append("superlative outside an attributed quotation")
+    return found
 
 
 def build_draft(slots: dict, beats: list[dict], hook: str) -> dict:
@@ -227,8 +284,8 @@ def build_draft(slots: dict, beats: list[dict], hook: str) -> dict:
 
     kept, dropped = _truncate_to_budget(clean_beats)
     if dropped:
-        log.warning("dropped %d proof beat(s) to fit MAX_SECONDS: %s",
-                    len(dropped), [b["slot"] for b in dropped])
+        log.info("dropped %d proof beat(s) (cap %d, then MAX_SECONDS): %s",
+                 len(dropped), config.MAX_PROOF_BEATS, [b["slot"] for b in dropped])
 
     script_text = " ".join(b["sentence"] for b in kept)
     tts_text = " ".join(b["tts_sentence"] for b in kept)
@@ -241,6 +298,9 @@ def build_draft(slots: dict, beats: list[dict], hook: str) -> dict:
             f"  script:   {script_text!r}")
 
     sentences = split_sentences(script_text)
+    banned = find_banned(script_text)
+    if banned:
+        log.warning("banned constructions present: %s", "; ".join(banned))
     return {
         "hook": hook,
         "script_text": script_text,
@@ -251,19 +311,22 @@ def build_draft(slots: dict, beats: list[dict], hook: str) -> dict:
         "sentences": sentences,
         "word_count": len(script_text.split()),
         "estimated_seconds": estimate_seconds(script_text),
+        "banned_constructions": banned,
     }
 
 
 def generate(report: dict, run, *, temperature: float = 0.7,
-             purpose: str = "draft-script") -> dict:
-    """One CHEAP_MODEL call over the full report slots. Returns the draft
-    artifact without writing it — check.py's retry loop calls this directly."""
+             label: str | None = None) -> dict:
+    """One "draft" model call over the full report slots. Returns the draft
+    artifact without writing it — check.py's retry loop calls this directly.
+    label only names the transcript, for callers drafting more than once."""
     slots = report["slots"]
     hook = pick_hook(run.run_id)
     prompt = _PROMPT.format(tags=", ".join(config.AUDIO_TAGS), hook=hook,
+                            max_proof=config.MAX_PROOF_BEATS,
                             notes=_notes_for_prompt(slots))
-    result = llm.json_call(config.CHEAP_MODEL, prompt, _DRAFT_SCHEMA,
-                           run=run, purpose=purpose, temperature=temperature)
+    result = llm.json_call("draft", prompt, _DRAFT_SCHEMA, run=run,
+                           temperature=temperature, label=label)
     draft = build_draft(slots, result["beats"], hook)
     draft["story"] = report["story"]
     return draft

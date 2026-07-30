@@ -74,30 +74,31 @@ rather than trusting the HTML.
 **Never estimate word timing from character counts.** Real per-word timings come from
 the ElevenLabs alignment and are in the payload.
 
-**The writer puts audio tags in the clean field too.** Asked for a clean sentence and
-a tagged one, the model returned `[pause]` in both, so comparing them found no
-mismatch and a literal "[pause]" reached `script_text` — subtitles and TTS input.
-Strip bracketed spans from *both* fields; never trust the clean field to be clean.
+**Pass `response_format` through unchanged.** Rewriting
+`{"type": "json_schema", ...}` into `{"type": "json_object", ...}` means "any valid
+JSON" and silently drops schema enforcement — `finish_reason` still reads `stop`, so the
+request looks healthy and only downstream validation catches the violation. A test
+asserting an enum field is respected is the only way to know enforcement is live.
 
-**A token bucket must start empty and hold one token, not `rpm`.** A full bucket
-released 15 calls in the first second against a rolling per-minute quota and earned
-an immediate 429. Charge the 429 backoff against the bucket too, or the wait refills
-it and the burst repeats the moment the sleep ends. Honour the provider's `RetryInfo`
-delay over any local guess — the real quota may not match the configured RPM.
+**`finish_reason == "length"` means truncated, invalid JSON.** Detect it explicitly and
+raise. Do not attempt to parse.
 
-**Publisher images live on sibling CDN domains.** arstechnica.com serves article
-images from cdn.arstechnica.net; with only the article domain allowlisted, every
-image needing a header fetch for dimensions was denied and image yield silently
-dropped. sources.json entries with `feed_url: null` are allowlist-only for this.
+**Reasoning tokens are billed as output and dwarf the answer.** Kimi at
+`reasoning_effort="low"` billed 8,376 output tokens to return 250 tokens of JSON — 95%
+invisible, since `reasoning_content` comes back empty. Measure `"none"` per purpose
+rather than assuming: it produced byte-comparable drafts at 1/27th the cost, but
+reordered the ranking, so `rank` keeps its reasoning and `draft` does not. GLM and
+DeepSeek accept the same efforts; `"minimal"` is rejected by all three.
 
-**Strip `www.` before matching feed URLs against HN URLs.** The Verge's feed links to
-`www.theverge.com`, HN submitters usually drop the `www`, and exact-host matching
-silently zeroes the HN signal for that entire source.
+**A "trivial" call is not a small one.** Rank — one score per candidate — truncated a
+4096-token ceiling mid-JSON at 34 candidates, because reasoning is spent before the
+first output token. Size `MAX_TOKENS` for the reasoning, not the answer.
 
 **Deterministic checks run in Python, never through a model.** Verbatim quote matching
 is a substring search. Scale-anchor arithmetic is division. Date filtering is a
-comparison. These are also the only checks immune to shared model priors, which
-matters because the writer and the checker are now the same model family.
+comparison. These are also the only checks immune to shared model priors — and while
+`draft`, `report` and `check` now run on three deliberately different families, a
+deterministic check is the only one that cannot be talked out of a verdict.
 
 ---
 
@@ -118,10 +119,33 @@ framed as the catch, and sentence rhythm. Never about the world.
 subtitles, checking, and visual matching. `tts_text` carries ElevenLabs v3 audio tags.
 Stripping bracketed spans from `tts_text` must yield `script_text` exactly — assert it.
 
-**Rate limits are the main failure mode.** Single provider: `gemini-3.5-flash-lite` at
-15 RPM (cheap work), `gemini-3.6` at 5 RPM (extraction and checking). A run makes 4–11
-calls. `llm.py` enforces a token bucket per model with 429 backoff, and logs every
-wait so stalls are visible rather than mysterious.
+**Models are chosen per purpose, never per call site.** All on Fireworks,
+OpenAI-compatible. `config.MODELS` maps a purpose to a (model, reasoning effort) pair:
+`rank` and `draft` on Kimi K2.6, `report` on DeepSeek V4 Pro, `check` on GLM 5.2.
+Stages pass a purpose string to `llm.json_call` and never a model name. Fireworks is
+paid serverless with no free-tier RPM ceiling, so there is no request spacing; keep
+429/5xx backoff only.
+
+**The three families are load-bearing, not incidental.** `check` judges `draft`'s output
+and re-queries the source when a claim fails, so it must share priors with neither. Do
+not consolidate onto one model to save money — the separation is the verification.
+`quotes.py` and `numbers.py` remain pure Python and still run first regardless.
+
+**Schema enforcement is per-model.** The enum test runs against all three. Never assume
+a `response_format` behaviour observed on one model holds on another.
+
+**`draft`'s model is a judgment call, not a measured one.** Published benchmarks cover
+GPQA and coding, none of which predict whether a 25-second script sounds human. Settle
+it with `--draft-model` and bench output, not with an index.
+
+**LLM cost is ~$0.02–0.03 per run against ~$0.13 of narration.** Anything that
+multiplies calls — bench variants, draft retries — stays on the cheaper model unless
+measured otherwise. GLM has the highest output price in the set, so keep the check
+schema tight.
+
+**`llm.py` is built around base_url + model, not around Fireworks.** A self-hosted vLLM
+or SGLang endpoint speaks the same OpenAI-compatible protocol, so migrating off
+serverless must be a `BASE_URL` change and nothing else.
 
 **Narration is ~97% of marginal cost** at roughly one credit per character. Everything
 else is rounding. Cache narration on a hash of the exact input; never synthesize a
