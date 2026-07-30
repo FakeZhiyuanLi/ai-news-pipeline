@@ -13,6 +13,7 @@ import runs
 import stages.check
 import stages.draft
 import stages.find
+import stages.narrate
 import stages.pick
 import stages.report
 
@@ -25,6 +26,7 @@ STAGES: dict = {
     "report": stages.report.run,
     "draft": stages.draft.run,
     "check": stages.check.run,
+    "narrate": stages.narrate.run,
 }
 
 
