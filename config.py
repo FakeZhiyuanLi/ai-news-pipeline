@@ -191,6 +191,17 @@ TTS_VOICE_SETTINGS = {
 CREDITS_PER_CHARACTER = 1.0
 AUDIO_DIR = "audio"  # cache, keyed by hash of (text, voice, model, settings)
 
+# --- Rendering -------------------------------------------------------------
+
+RENDERER_DIR = "renderer"
+RENDERER_PUBLIC_DIR = "renderer/public"
+RENDERER_PROPS_FILE = "renderer/props.json"
+COMPOSITION_ID = "NewsVideo"
+VIDEO_FILENAME = "video.mp4"
+RENDER_TIMEOUT_SECONDS = 1800
+# Duration = real audio length + this. Never estimated_seconds.
+VIDEO_TAIL_SECONDS = 0.6
+
 # --- Bench -----------------------------------------------------------------
 
 BENCH_DIR = "data/bench"

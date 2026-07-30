@@ -22,6 +22,14 @@ ledger.json
 # those recorded responses, so they are source, not output.
 data/bench/
 
+# Renderer. package-lock.json IS tracked so the pinned versions are
+# reproducible; props.json and public/ are generated per run by
+# `python run.py --update-props`.
+renderer/node_modules/
+renderer/props.json
+renderer/public/
+renderer/out/
+
 # Narration cache and rendered media. audio/ is keyed by a hash of the exact
 # synthesis inputs — regenerable, but only by spending credits, so do not
 # delete it casually.

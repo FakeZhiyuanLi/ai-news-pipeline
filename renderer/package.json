@@ -1,0 +1,18 @@
+{
+  "name": "hyperfeed-renderer",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "remotion studio src/index.js",
+    "render": "remotion render src/index.js NewsVideo"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.501",
+    "@remotion/cli": "4.0.501",
+    "@remotion/renderer": "4.0.501",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.501"
+  },
+  "type": "module",
+  "private": true
+}
