@@ -25,6 +25,7 @@ from bs4 import BeautifulSoup
 import config
 import llm
 import sources
+from checks import numbers as number_checks
 
 log = logging.getLogger(__name__)
 
@@ -80,7 +81,11 @@ Slots:
   this sense — it is a fragment, and a bare fragment invites the writer to
   invent a meaning for it. Drop it rather than emit it.
 - scale_anchor: ONE of the numbers restated in human terms using one of the
-  reference values listed below, and nothing else. anchor_math must be a
+  reference values listed below, and nothing else. The RESULT must be a
+  number a person can picture — roughly 0.1 to 1,000 of the reference unit.
+  "$5 billion is 75,075 average salaries" is not a human scale, it is a
+  second incomprehensible number; return null instead.
+  anchor_math must be a
   checkable arithmetic expression over the article's number and the reference
   value, e.g. "490 / 500". Null if nothing anchors cleanly.
 - quote: a verbatim quote from a NAMED person, copied character-for-character
@@ -281,6 +286,23 @@ def _extract_slots(story: dict, source_text: str, run) -> dict:
         log.warning("quote is not verbatim in the source; dropping it: %r",
                     quote["text"])
         slots["quote"] = None
+        quote = None
+    if quote:
+        # Quotes lifted from '"...constructed," she says' arrive with the
+        # dangling comma attached. Asking the writer to reproduce a fragment
+        # ending mid-punctuation is asking for text nobody would write.
+        trimmed = quote["text"].strip().rstrip(",;: ").strip()
+        if trimmed != quote["text"]:
+            log.info("trimmed dangling punctuation from quote")
+            quote["text"] = trimmed
+
+    # An anchor only helps if the result is a number a person can picture.
+    # "$5bn is 75,075 average salaries" is a second incomprehensible number,
+    # so emit null rather than a failing anchor.
+    ok, reason = number_checks.anchor_is_useful(slots.get("scale_anchor"))
+    if slots.get("scale_anchor") and not ok:
+        log.warning("dropping scale anchor: %s", reason)
+        slots["scale_anchor"] = None
     return slots
 
 
