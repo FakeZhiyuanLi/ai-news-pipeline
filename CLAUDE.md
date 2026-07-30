@@ -74,6 +74,12 @@ rather than trusting the HTML.
 **Never estimate word timing from character counts.** Real per-word timings come from
 the ElevenLabs alignment and are in the payload.
 
+**The alignment times audio tags as if they were spoken.** `[pause]` comes back as
+seven aligned characters occupying 1.6s of real audio — the pause being performed. The
+elapsed time is genuine and must stay in the timeline, but those characters are not
+words, so map `tts_text` positions to `script_text` positions by walking both strings.
+Arithmetic on tag lengths drifts, because stripping a tag also collapses a space.
+
 **Pass `response_format` through unchanged.** Rewriting
 `{"type": "json_schema", ...}` into `{"type": "json_object", ...}` means "any valid
 JSON" and silently drops schema enforcement — `finish_reason` still reads `stop`, so the

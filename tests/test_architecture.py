@@ -19,7 +19,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 SDK_ROOTS = {"openai", "google", "anthropic", "elevenlabs"}
-SDK_ALLOWED = {"llm.py"}
+# One module per vendor SDK, and nothing else may import one: llm.py owns the
+# text models, tts.py owns narration. Swapping either provider touches one
+# file. A stage that imports an SDK has taken provider knowledge into the
+# pipeline, which is how the previous build reached 10,775 lines.
+SDK_ALLOWED = {"llm.py", "tts.py"}
+# Each SDK belongs to exactly one module — tts.py must not reach for openai,
+# llm.py must not reach for elevenlabs.
+SDK_OWNER = {"openai": "llm.py", "google": "llm.py", "anthropic": "llm.py",
+             "elevenlabs": "tts.py"}
 
 MODEL_LITERAL_ALLOWED = {"config.py"}
 # A provider path ("accounts/fireworks/models/..."), a vendor-versioned slug
@@ -70,16 +78,20 @@ def format_violations(rule: str, violations: list[str]) -> str:
     return f"{rule}:\n" + "\n".join(f"  {v}" for v in violations)
 
 
-def test_only_llm_imports_model_sdks():
+def test_only_llm_and_tts_import_model_sdks():
     violations = []
     for path in project_files():
-        if path.name in SDK_ALLOWED:
-            continue
         for module, lineno, _ in imported_modules(parse(path)):
-            if module.split(".")[0] in SDK_ROOTS:
-                violations.append(f"{path.relative_to(ROOT)}:{lineno} imports {module}")
+            root_name = module.split(".")[0]
+            if root_name not in SDK_ROOTS:
+                continue
+            owner = SDK_OWNER[root_name]
+            if path.name != owner:
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{lineno} imports {module} — "
+                    f"that SDK belongs to {owner}")
     assert not violations, format_violations(
-        "model SDK imports outside llm.py", violations)
+        "model SDK imports outside their owning module", violations)
 
 
 def test_only_runs_touches_the_filesystem():

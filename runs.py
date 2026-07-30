@@ -29,6 +29,7 @@ ARTIFACT_PRODUCERS: dict[str, str] = {
     "report": "report",
     "draft": "draft",
     "script": "check",
+    "narration": "narrate",
 }
 
 
@@ -92,6 +93,22 @@ def read_jsonl(name: str) -> list[dict]:
         raise MissingDataFileError(f"data file not found: {path}")
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip()]
+
+
+def cached_bytes(directory: str, filename: str) -> bytes | None:
+    """Read a cached binary blob, or None if it is not there. Used for
+    narration audio, which is ~97% of marginal cost and must never be
+    re-synthesised for a script that has not changed."""
+    path = _resolve(directory) / filename
+    return path.read_bytes() if path.exists() else None
+
+
+def write_cached_bytes(directory: str, filename: str, data: bytes) -> str:
+    target = _resolve(directory)
+    target.mkdir(parents=True, exist_ok=True)
+    path = target / filename
+    path.write_bytes(data)
+    return str(path.relative_to(PROJECT_ROOT))
 
 
 def write_text_file(directory: str, filename: str, text: str) -> str:

@@ -1,4 +1,5 @@
 beautifulsoup4==4.15.0
+elevenlabs==2.59.0
 feedparser==6.0.12
 openai==2.50.0
 pytest==9.1.1
