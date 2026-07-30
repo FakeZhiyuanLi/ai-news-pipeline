@@ -111,6 +111,30 @@ def write_cached_bytes(directory: str, filename: str, data: bytes) -> str:
     return str(path.relative_to(PROJECT_ROOT))
 
 
+def copy_into(directory: str, filename: str, source_path: str) -> str:
+    """Copy an existing file (cached narration audio) into a directory the
+    renderer can serve from. Returns the path relative to the project root."""
+    import shutil
+    target = _resolve(directory)
+    target.mkdir(parents=True, exist_ok=True)
+    destination = target / filename
+    shutil.copyfile(_resolve(source_path), destination)
+    return str(destination.relative_to(PROJECT_ROOT))
+
+
+def run_dir_path(run_id: str) -> str:
+    """Absolute path of a run directory, for handing to an external tool."""
+    return str(_runs_root() / run_id)
+
+
+def absolute_path(name: str) -> str:
+    return str(_resolve(name))
+
+
+def file_exists(name: str) -> bool:
+    return _resolve(name).exists()
+
+
 def write_text_file(directory: str, filename: str, text: str) -> str:
     """Write a human-readable report (bench output, README) and return its
     path. Not a run artifact — those go through Run.write."""

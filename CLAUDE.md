@@ -1,9 +1,7 @@
 # HyperFeed
 
-Turns one fresh AI news story per day into a short vertical video. Python pipeline,
-Gemini for all model calls, ElevenLabs for narration, Remotion for rendering.
-
-This file carries the rules and the scar tissue. Read the code for structure.
+This file carries the rules and the scar tissue. README.md describes the structure;
+read the code for the rest.
 
 ---
 
@@ -40,6 +38,8 @@ abbreviation list (U.S., e.g., i.e., Inc., vs.) for the genuine exceptions.
 
 **Video duration comes from real audio length, never from an estimate.** A 20.9s video
 was rendered over 24.5s of narration and silently truncated the final sentence.
+Remotion's `calculateMetadata` derives frames from the narration's measured
+`duration_seconds`; scripts run 15–110s, so any fixed `durationInFrames` is wrong.
 
 **Word count is a ceiling, never a target.** `TARGET_WORDS = 112` against five facts
 worth ~70 words caused the model to pad — first by restating, then by inventing
@@ -140,7 +140,6 @@ paid serverless with no free-tier RPM ceiling, so there is no request spacing; k
 **The three families are load-bearing, not incidental.** `check` judges `draft`'s output
 and re-queries the source when a claim fails, so it must share priors with neither. Do
 not consolidate onto one model to save money — the separation is the verification.
-`quotes.py` and `numbers.py` remain pure Python and still run first regardless.
 
 **Schema enforcement is per-model.** The enum test runs against all three. Never assume
 a `response_format` behaviour observed on one model holds on another.
@@ -150,17 +149,19 @@ GPQA and coding, none of which predict whether a 25-second script sounds human. 
 it with `--draft-model` and bench output, not with an index.
 
 **LLM cost is ~$0.02–0.03 per run against ~$0.13 of narration.** Anything that
-multiplies calls — bench variants, draft retries — stays on the cheaper model unless
-measured otherwise. GLM has the highest output price in the set, so keep the check
-schema tight.
-
-**`llm.py` is built around base_url + model, not around Fireworks.** A self-hosted vLLM
-or SGLang endpoint speaks the same OpenAI-compatible protocol, so migrating off
-serverless must be a `BASE_URL` change and nothing else.
+multiplies calls stays on the cheaper model unless measured otherwise. GLM has the
+highest output price in the set, so keep the check schema tight.
 
 **Narration is ~97% of marginal cost** at roughly one credit per character. Everything
 else is rounding. Cache narration on a hash of the exact input; never synthesize a
 script that failed checking.
+
+**Remotion `<Sequence>` resets `useCurrentFrame()` to zero.** Alignment word timings are
+absolute seconds from the start of the audio, so subtitles inside a sequence must have
+the sequence's own start subtracted or every word lights up early by its offset.
+
+**Size display type to the frame, not a constant.** A fixed 150px key phrase fit "278"
+and ran "breakthroughs" off both edges; long subtitles then grew up into it.
 
 **`REFERENCE_SCALES` is maintained by hand** in `config.py`, each value with a `source`
 and `as_of`. A scale anchor computed from a model-supplied reference is a
@@ -174,8 +175,7 @@ Do not add these. Each was considered and rejected for this build.
 
 - Orchestration frameworks (Airflow, Prefect), LangChain, LlamaIndex
 - Vector databases — this is daily news, not retrieval
-- Docker for local development
-- Image or video generation APIs
+- Docker for local development; image or video generation APIs
 - A stock B-roll library — the fallback is typographic
 - Any human-in-the-loop recording path; a script is just text
 - Multi-story videos — one story per video, `STORIES_PER_VIDEO` is not a thing here
@@ -191,8 +191,8 @@ Do not add these. Each was considered and rejected for this build.
   when a pitfall is discovered — the concrete failure, not a general principle — and
   keep the file under 200 lines. Directory layouts, dependency lists, and architecture
   overviews go in README.md; they go stale here.
-- Every module gets a `__main__` block that exercises it standalone.
-- Pin dependencies. The previous build had zero version pins.
+- Every module gets a `__main__` block that exercises it standalone. Pin dependencies —
+  the previous build had zero version pins.
 - `run.py --selftest` runs the pipeline against committed fixtures with all model
   calls stubbed. Use it to verify changes without consuming rate limit.
 - Prefer failing loudly to degrading quietly. No fresh story, a script that fails

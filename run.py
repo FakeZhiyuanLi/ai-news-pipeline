@@ -232,6 +232,13 @@ def main(argv=None) -> int:
     parser.add_argument("--selftest", action="store_true",
                         help="run the pipeline against committed fixtures with "
                              "all model calls stubbed; zero API calls")
+    parser.add_argument("--update-props", action="store_true",
+                        help="write renderer/props.json from the most recent "
+                             "narrated run, so npm start previews something real")
+    parser.add_argument("--render", action="store_true",
+                        help="render video.mp4 into the run directory")
+    parser.add_argument("--force-tts", action="store_true",
+                        help="narrate stage: bypass the audio cache")
     args = parser.parse_args(argv)
 
     if args.costs:
@@ -240,6 +247,27 @@ def main(argv=None) -> int:
         logging.basicConfig(level=logging.WARNING,
                             format="%(levelname)s %(name)s: %(message)s")
         return _selftest()
+
+    if args.update_props or args.render:
+        import render
+        logging.basicConfig(
+            level=logging.DEBUG if args.verbose else logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+        target = runs.Run.resume(args.run_id) if args.run_id else None
+        try:
+            if args.update_props and not args.render:
+                print(render.update_props(target))
+                return 0
+            run = target or render.latest_narrated_run()
+            video = render.render(run)
+            problems = render.verify(video, run)
+            for problem in problems:
+                log.error("%s", problem)
+            print(video)
+            return 1 if problems else 0
+        except render.RenderError as e:
+            log.error("%s", e)
+            return 1
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -261,7 +289,10 @@ def main(argv=None) -> int:
     log.info("run %s", run.run_id)
     for name in selected:
         log.info("stage %s", name)
-        STAGES[name](run)
+        if name == "narrate" and args.force_tts:
+            STAGES[name](run, force=True)
+        else:
+            STAGES[name](run)
     return 0
 
 
