@@ -171,6 +171,26 @@ LLM_MAX_RETRIES = 5
 LLM_BACKOFF_BASE_SECONDS = 2.0
 LLM_BACKOFF_CAP_SECONDS = 60.0
 
+# --- Narration -------------------------------------------------------------
+# ~97% of marginal cost at roughly one credit per character. A 110-second
+# script costs about 4x a short one, so caching is not an optimisation here.
+
+VOICE_NAME = "Liam - Energetic, Social Media Creator"
+VOICE_ID_ENV = "ELEVENLABS_VOICE_ID"
+ELEVENLABS_KEY_ENV = "ELEVENLABS_API_KEY"
+TTS_MODEL_ID = "eleven_v3"
+TTS_OUTPUT_FORMAT = "mp3_44100_128"
+# v3 settings, read from the SDK's VoiceSettings type — not a v2 shape.
+TTS_VOICE_SETTINGS = {
+    "stability": 0.5,        # v3 is less stable at the extremes
+    "similarity_boost": 0.75,
+    "style": 0.0,
+    "use_speaker_boost": True,
+    "speed": 1.0,
+}
+CREDITS_PER_CHARACTER = 1.0
+AUDIO_DIR = "audio"  # cache, keyed by hash of (text, voice, model, settings)
+
 # --- Bench -----------------------------------------------------------------
 
 BENCH_DIR = "data/bench"
