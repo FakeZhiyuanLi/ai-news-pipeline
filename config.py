@@ -61,21 +61,20 @@ MAX_TAGS_PER_SENTENCE = 1
 # a six-number report became an eight-beat lab-notebook recital.
 MAX_PROOF_BEATS = 3
 
-# Hooks tease the story. None promises a duration — with dynamic length that
-# is a claim the script cannot guarantee. Chosen pseudo-randomly, seeded on
-# run_id, so a run is reproducible.
-HOOKS = (
-    "Here's what just happened.",
-    "This one is worth your attention.",
-    "Something changed today.",
-    "You're going to hear about this one.",
-    "Pay attention to this.",
-    "Here's the story.",
-    "This landed today.",
-    "Worth knowing about.",
-    "Here's what's new.",
-    "This is the one to watch.",
-)
+# There is no hook pool. A canned opener chosen before the story is known
+# cannot tease it, and "Here's what's new." is dead air in short-form. The
+# first sentence IS the lede — the most surprising concrete fact, under 12
+# words — so it varies by construction, which defeats templated-opening
+# detection better than rotating ten fixed strings ever did.
+
+# Drafting is a writing task: at 0.7 two variants of one story came back
+# byte-identical, which means the constraints left exactly one output.
+DRAFT_TEMPERATURE = 0.9
+
+# Attempts at the deterministic prose gates before giving up. Failing twice
+# means the prompt has stopped framing the task generatively — worth seeing,
+# not worth papering over.
+MAX_DRAFT_ATTEMPTS_PROSE = 2
 
 # Wire-copy constructions the writer must not produce. Each entry is a regex
 # checked against script_text, with a human-readable label for the failure.

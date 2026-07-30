@@ -20,6 +20,7 @@ import sys
 
 import config
 import runs
+from checks import prose
 from stages import draft as draft_stage
 
 log = logging.getLogger("bench")
@@ -63,11 +64,24 @@ def _costs_since(marker: int) -> list[dict]:
     return lines[marker:]
 
 
+def _variant_overlap(a: str, b: str) -> float:
+    """Pairwise word overlap between two variants of the same story. Above
+    ~90% the prompt is over-constrained and the variants tell us nothing."""
+    wa, wb = prose.normalise(a), prose.normalise(b)
+    if not wa or not wb:
+        return 0.0
+    from collections import Counter
+    shared = sum((Counter(wa) & Counter(wb)).values())
+    return 2 * shared / (len(wa) + len(wb))
+
+
 def _render_draft(d: dict, label: str) -> list[str]:
     out = [f"### {label}",
            "",
            f"- words: **{d['word_count']}**  |  estimated: **{d['estimated_seconds']}s**"
            f"  |  beats: **{len(d['beats'])}**",
+           f"- sentence lengths: **{d['sentence_lengths']}**"
+           f"  |  attempts: {d.get('attempts', 1)}",
            f"- slots used: **{', '.join(d['slots_used'])}**"]
     if d["dropped_beats"]:
         out.append(f"- dropped (proof cap / MAX_SECONDS): "
@@ -108,6 +122,7 @@ def bench(n: int, variants: int, *, temperature: float, check: bool,
              f"{config.MODELS['draft'][0].split('/')[-1]}", ""]
 
     slot_usage: dict[str, int] = {}
+    overlaps: list[float] = []
     drafts_made = 0
     for run_id in selected:
         run = runs.Run.resume(run_id)
@@ -120,6 +135,7 @@ def bench(n: int, variants: int, *, temperature: float, check: bool,
                   ""]
         print(f"\n=== {report['story']['title']}")
         print(f"    report slots: {', '.join(available)}")
+        story_scripts = []
         for k in range(1, variants + 1):
             try:
                 d = draft_stage.generate(report, run, temperature=temperature,
@@ -129,19 +145,37 @@ def bench(n: int, variants: int, *, temperature: float, check: bool,
                 print(f"    variant {k}: FAILED {e.__class__.__name__}: {e}")
                 continue
             drafts_made += 1
+            story_scripts.append(d["script_text"])
             for slot in d["slots_used"]:
                 slot_usage[slot] = slot_usage.get(slot, 0) + 1
             lines += _render_draft(d, f"variant {k}")
             print(f"    variant {k}: {len(d['beats'])} beats, {d['word_count']}w, "
-                  f"~{d['estimated_seconds']}s, slots: {', '.join(d['slots_used'])}"
+                  f"~{d['estimated_seconds']}s, lengths {d['sentence_lengths']}, "
+                  f"slots: {', '.join(d['slots_used'])}"
                   + (f"  BANNED: {'; '.join(d['banned_constructions'])}"
                      if d.get("banned_constructions") else ""))
             print(f"      {d['script_text']}")
 
+        # Variants that agree too closely are not telling us anything: the
+        # prompt has left only one possible output.
+        for i in range(len(story_scripts)):
+            for j in range(i + 1, len(story_scripts)):
+                overlap = _variant_overlap(story_scripts[i], story_scripts[j])
+                overlaps.append(overlap)
+                flag = "  OVER-CONSTRAINED" if overlap > 0.90 else ""
+                note = (f"variant {i + 1} vs {j + 1}: "
+                        f"{overlap:.0%} word overlap{flag}")
+                lines += [f"- {note}", ""]
+                print(f"    {note}")
+
     spend = _spend_usd(_costs_since(marker))
+    mean_overlap = sum(overlaps) / len(overlaps) if overlaps else 0.0
     summary = [f"- drafts: {drafts_made}",
                f"- slot usage across drafts: "
                f"{', '.join(f'{s}={n}' for s, n in sorted(slot_usage.items())) or 'none'}",
+               f"- mean variant overlap: {mean_overlap:.0%}"
+               + ("  (over ~90% means the prompt is over-constrained)"
+                  if mean_overlap > 0.90 else ""),
                f"- spend: ${spend:.5f}"]
     lines += ["---", "", "## totals", ""] + summary + [""]
     print("\n" + "\n".join(summary))
