@@ -22,7 +22,10 @@ ledger.json
 # those recorded responses, so they are source, not output.
 data/bench/
 
-# Rendered media
+# Narration cache and rendered media. audio/ is keyed by a hash of the exact
+# synthesis inputs — regenerable, but only by spending credits, so do not
+# delete it casually.
+audio/
 *.mp3
 *.mp4
 *.wav
