@@ -1,0 +1,276 @@
+[
+  {
+    "purpose": "draft",
+    "response": {
+      "beats": [
+        {
+          "sentence": "Washington put $5 billion into AI research.",
+          "tts_sentence": "Washington put $5 billion into AI research.",
+          "slot": "lede"
+        },
+        {
+          "sentence": "5,000 labs applied.",
+          "tts_sentence": "5,000 labs applied.",
+          "slot": "number"
+        },
+        {
+          "sentence": "278 got it.",
+          "tts_sentence": "278 got it.",
+          "slot": "number"
+        },
+        {
+          "sentence": "And the money skips universities entirely — it goes to individual researchers and private companies.",
+          "tts_sentence": "And the money skips universities entirely — it goes to individual researchers and private companies.",
+          "slot": "number"
+        },
+        {
+          "sentence": "Science, funded like a startup portfolio.",
+          "tts_sentence": "Science, funded like a startup portfolio.",
+          "slot": "tension"
+        },
+        {
+          "sentence": "AI policy professor Claes de Vreese: \"You cannot use venture capital to force breakthroughs while virtually already selling the patent.\"",
+          "tts_sentence": "AI policy professor Claes de Vreese: [serious] \"You cannot use venture capital to force breakthroughs while virtually already selling the patent.\"",
+          "slot": "quote"
+        },
+        {
+          "sentence": "The plan also cuts life sciences while boosting foundational biology, without saying where one ends and the other begins.",
+          "tts_sentence": "The plan also cuts life sciences while boosting foundational biology, without saying where one ends and the other begins.",
+          "slot": "tension"
+        }
+      ]
+    }
+  },
+  {
+    "purpose": "check",
+    "response": {
+      "claims": [
+        {
+          "claim": "Washington put $5 billion into AI research.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 0
+        },
+        {
+          "claim": "5,000 labs applied for the funding.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 1
+        },
+        {
+          "claim": "278 labs got the funding.",
+          "type": "factual",
+          "anaphoric": true,
+          "s": 2
+        },
+        {
+          "claim": "The funding skips universities entirely.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 3
+        },
+        {
+          "claim": "The funding goes to individual researchers and private companies.",
+          "type": "factual",
+          "anaphoric": true,
+          "s": 3
+        },
+        {
+          "claim": "Science is funded like a startup portfolio.",
+          "type": "judgment",
+          "anaphoric": false,
+          "s": 4
+        },
+        {
+          "claim": "You cannot use venture capital to force breakthroughs while virtually already selling the patent.",
+          "type": "quote",
+          "anaphoric": false,
+          "s": 5
+        },
+        {
+          "claim": "The plan cuts life sciences.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 6
+        },
+        {
+          "claim": "The plan boosts foundational biology.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 6
+        },
+        {
+          "claim": "The plan does not specify where life sciences ends and foundational biology begins.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 6
+        }
+      ]
+    }
+  },
+  {
+    "purpose": "check",
+    "response": {
+      "verdicts": [
+        {
+          "v": "SUPPORTED",
+          "why": "Article states the Trump administration directed $5 billion toward AI-driven science projects.",
+          "i": 0
+        },
+        {
+          "v": "REFUTED",
+          "why": "Article says over 5,000 applications were submitted, not 5,000 labs.",
+          "i": 1
+        },
+        {
+          "v": "REFUTED",
+          "why": "Article says 278 projects were selected, not 278 labs.",
+          "i": 2
+        },
+        {
+          "v": "REFUTED",
+          "why": "Article says the Genesis Mission project will unite national laboratories, industry, and academia.",
+          "i": 3
+        },
+        {
+          "v": "REFUTED",
+          "why": "Article says the manifesto proposes shifting support toward individual researchers and private companies, but the Genesis Mission funding unites national labs, industry, and academia.",
+          "i": 4
+        },
+        {
+          "v": "SUPPORTED",
+          "why": "Article notes a proposal suggesting radically reducing government support for life sciences.",
+          "i": 5
+        },
+        {
+          "v": "SUPPORTED",
+          "why": "Article states the plan increases support for foundational research in the biological sciences.",
+          "i": 6
+        },
+        {
+          "v": "SUPPORTED",
+          "why": "Article says neither the report nor the White House defines those terms or explains which fields would gain or lose funding.",
+          "i": 7
+        }
+      ]
+    }
+  },
+  {
+    "purpose": "draft",
+    "response": {
+      "beats": [
+        {
+          "sentence": "Washington put $5 billion into AI research.",
+          "tts_sentence": "Washington put $5 billion into AI research.",
+          "slot": "lede"
+        },
+        {
+          "sentence": "278 projects selected.",
+          "tts_sentence": "278 projects selected.",
+          "slot": "number"
+        },
+        {
+          "sentence": "Over 5,000 applied.",
+          "tts_sentence": "Over 5,000 applied.",
+          "slot": "number"
+        },
+        {
+          "sentence": "AI policy professor Claes de Vreese: \"You cannot use venture capital to force breakthroughs while virtually already selling the patent.\"",
+          "tts_sentence": "AI policy professor Claes de Vreese: [pause] \"You cannot use venture capital to force breakthroughs while virtually already selling the patent.\"",
+          "slot": "quote"
+        },
+        {
+          "sentence": "The plan cuts life sciences funding while boosting foundational biology, without drawing the line between them.",
+          "tts_sentence": "The plan cuts life sciences funding while boosting foundational biology, without drawing the line between them.",
+          "slot": "tension"
+        }
+      ]
+    }
+  },
+  {
+    "purpose": "check",
+    "response": {
+      "claims": [
+        {
+          "claim": "Washington put $5 billion into AI research.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 0
+        },
+        {
+          "claim": "278 projects were selected.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 1
+        },
+        {
+          "claim": "Over 5,000 projects applied.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 2
+        },
+        {
+          "claim": "Claes de Vreese said, \"You cannot use venture capital to force breakthroughs while virtually already selling the patent.\"",
+          "type": "quote",
+          "anaphoric": false,
+          "s": 3
+        },
+        {
+          "claim": "The plan cuts life sciences funding.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 4
+        },
+        {
+          "claim": "The plan boosts foundational biology.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 4
+        },
+        {
+          "claim": "The plan does not draw a line between life sciences funding and foundational biology.",
+          "type": "factual",
+          "anaphoric": false,
+          "s": 4
+        }
+      ]
+    }
+  },
+  {
+    "purpose": "check",
+    "response": {
+      "verdicts": [
+        {
+          "i": 0,
+          "v": "SUPPORTED",
+          "why": "Article says $5 billion directed toward AI-driven science projects."
+        },
+        {
+          "i": 1,
+          "v": "SUPPORTED",
+          "why": "Article states 278 projects selected."
+        },
+        {
+          "i": 2,
+          "v": "SUPPORTED",
+          "why": "Article says selected from over 5,000 applications."
+        },
+        {
+          "i": 3,
+          "v": "SUPPORTED",
+          "why": "Article cites proposal to radically reduce support for life sciences."
+        },
+        {
+          "i": 4,
+          "v": "SUPPORTED",
+          "why": "Article cites increasing support for foundational biological research."
+        },
+        {
+          "i": 5,
+          "v": "SUPPORTED",
+          "why": "Article says neither report nor White House defines the terms or boundary."
+        }
+      ]
+    }
+  }
+]

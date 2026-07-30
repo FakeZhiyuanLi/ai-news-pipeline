@@ -168,8 +168,14 @@ def rhythm_problems(sentences: list[str], *,
                 f"no sentence under {SHORT_SENTENCE_WORDS} words "
                 f"(shortest is {min(own)}) — a short line after a long one is "
                 "the cheapest way to sound human")
+        # Uniformity is only audible when the sentences are long enough to
+        # have a cadence to repeat. [8, 4, 4, 6, 4, 5] is a run of short,
+        # punchy lines — the goal, not the fault — and rejecting it sends the
+        # writer back to pad. Judge only when the copy is running long.
         spread = statistics.pstdev(own)
-        if spread < MIN_LENGTH_STDEV and (max(own) - min(own)) < MIN_LENGTH_RANGE:
+        if (sum(own) / len(own) > SHORT_SENTENCE_WORDS
+                and spread < MIN_LENGTH_STDEV
+                and (max(own) - min(own)) < MIN_LENGTH_RANGE):
             problems.append(
                 f"sentence lengths barely vary ({own}, spread {spread:.1f}) — "
                 "uniform pacing is the strongest tell that a machine wrote it")

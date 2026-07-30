@@ -197,6 +197,11 @@ def main(argv=None) -> int:
                         help="drafts per report; one sample proves nothing")
     parser.add_argument("--run-ids", nargs="+", metavar="ID",
                         help="bench these specific runs instead of the last N")
+    parser.add_argument("--draft-model", metavar="SLUG",
+                        help="override the model used for drafting, to compare "
+                             "writers over the same reports")
+    parser.add_argument("--draft-effort", metavar="EFFORT",
+                        help="override reasoning effort for drafting")
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--check", action="store_true",
                         help="also check each draft (needs check.py; off by default "
@@ -205,6 +210,14 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
+
+    # Model selection belongs to config.MODELS; the bench may point the
+    # "draft" purpose somewhere else for one run to compare writers.
+    if args.draft_model or args.draft_effort:
+        model, effort = config.MODELS["draft"]
+        config.MODELS["draft"] = (args.draft_model or model,
+                                  args.draft_effort or effort)
+        log.info("drafting with %s (effort %s)", *config.MODELS["draft"])
 
     with _BlockNarration():
         bench(args.bench, args.variants, temperature=args.temperature,

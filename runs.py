@@ -28,6 +28,7 @@ ARTIFACT_PRODUCERS: dict[str, str] = {
     "story": "pick",
     "report": "report",
     "draft": "draft",
+    "script": "check",
 }
 
 
@@ -104,6 +105,32 @@ def write_text_file(directory: str, filename: str, text: str) -> str:
 
 
 # --- Runs ------------------------------------------------------------------
+
+class temporary_root:
+    """Point the runs directory at a throwaway location. For --selftest and
+    module demos, so they never write into the real runs/ tree."""
+
+    def __enter__(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        global PROJECT_ROOT
+        self._saved = PROJECT_ROOT
+        PROJECT_ROOT = Path(self._tmp.name)
+        return PROJECT_ROOT
+
+    def __exit__(self, *exc):
+        global PROJECT_ROOT
+        PROJECT_ROOT = self._saved
+        self._tmp.cleanup()
+
+
+def fixture_text(name: str) -> str:
+    """Read a committed test fixture. Fixtures are inputs, not artifacts."""
+    path = PROJECT_ROOT / "tests" / "fixtures" / name
+    if not path.exists():
+        raise MissingDataFileError(f"fixture not found: {path}")
+    return path.read_text(encoding="utf-8")
+
 
 def all_run_ids() -> list[str]:
     root = _runs_root()
