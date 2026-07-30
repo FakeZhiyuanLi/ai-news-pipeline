@@ -52,13 +52,7 @@ class _BlockNarration:
 
 
 def _spend_usd(entries: list[dict]) -> float:
-    total = 0.0
-    for entry in entries:
-        price = config.MODEL_PRICE_USD_PER_MTOK.get(entry["model"])
-        if price:
-            total += (entry["tokens"]["input"] * price["input"]
-                      + entry["tokens"]["output"] * price["output"]) / 1_000_000
-    return total
+    return sum(entry.get("cost_usd", 0.0) for entry in entries)
 
 
 def _costs_since(marker: int) -> list[dict]:
@@ -76,7 +70,10 @@ def _render_draft(d: dict, label: str) -> list[str]:
            f"  |  beats: **{len(d['beats'])}**",
            f"- slots used: **{', '.join(d['slots_used'])}**"]
     if d["dropped_beats"]:
-        out.append(f"- dropped to fit MAX_SECONDS: {[b['slot'] for b in d['dropped_beats']]}")
+        out.append(f"- dropped (proof cap / MAX_SECONDS): "
+                   f"{[b['slot'] for b in d['dropped_beats']]}")
+    if d.get("banned_constructions"):
+        out.append(f"- BANNED: {'; '.join(d['banned_constructions'])}")
     out += ["", "```", d["script_text"], "```", "", "beats:"]
     out += [f"{i}. `[{b['slot']}]` {b['sentence']}"
             for i, b in enumerate(d["beats"], 1)]
@@ -85,22 +82,30 @@ def _render_draft(d: dict, label: str) -> list[str]:
     return out
 
 
-def bench(n: int, variants: int, *, temperature: float, check: bool) -> str:
+def bench(n: int, variants: int, *, temperature: float, check: bool,
+          run_ids: list[str] | None = None) -> str:
     if check:
         raise SystemExit("--check needs check.py, which does not exist yet")
 
-    run_ids = [r for r in runs.all_run_ids() if runs.Run.resume(r).exists("report")]
-    if not run_ids:
+    available = [r for r in runs.all_run_ids() if runs.Run.resume(r).exists("report")]
+    if not available:
         raise SystemExit("no run directory has a report artifact yet — "
                          "run: python run.py --stage report")
-    selected = run_ids[-n:]
+    if run_ids:
+        missing = [r for r in run_ids if r not in available]
+        if missing:
+            raise SystemExit(f"no report artifact in: {', '.join(missing)}")
+        selected = run_ids
+    else:
+        selected = available[-n:]
     log.info("benching %d report(s) x %d variant(s)", len(selected), variants)
 
     marker = len(_costs_since(0))
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime(config.RUN_TIMESTAMP_FORMAT)
     lines = [f"# bench {stamp}", "",
              f"{len(selected)} reports x {variants} variants, "
-             f"temperature {temperature}, model {config.CHEAP_MODEL}", ""]
+             f"temperature {temperature}, draft model "
+             f"{config.MODELS['draft'][0].split('/')[-1]}", ""]
 
     slot_usage: dict[str, int] = {}
     drafts_made = 0
@@ -118,7 +123,7 @@ def bench(n: int, variants: int, *, temperature: float, check: bool) -> str:
         for k in range(1, variants + 1):
             try:
                 d = draft_stage.generate(report, run, temperature=temperature,
-                                         purpose=f"bench-draft-{k}")
+                                         label=f"bench-draft-{k}")
             except Exception as e:
                 lines += [f"### variant {k}", "", f"FAILED: {e.__class__.__name__}: {e}", ""]
                 print(f"    variant {k}: FAILED {e.__class__.__name__}: {e}")
@@ -128,7 +133,9 @@ def bench(n: int, variants: int, *, temperature: float, check: bool) -> str:
                 slot_usage[slot] = slot_usage.get(slot, 0) + 1
             lines += _render_draft(d, f"variant {k}")
             print(f"    variant {k}: {len(d['beats'])} beats, {d['word_count']}w, "
-                  f"~{d['estimated_seconds']}s, slots: {', '.join(d['slots_used'])}")
+                  f"~{d['estimated_seconds']}s, slots: {', '.join(d['slots_used'])}"
+                  + (f"  BANNED: {'; '.join(d['banned_constructions'])}"
+                     if d.get("banned_constructions") else ""))
             print(f"      {d['script_text']}")
 
     spend = _spend_usd(_costs_since(marker))
@@ -154,6 +161,8 @@ def main(argv=None) -> int:
                         help="how many existing run directories to draft over")
     parser.add_argument("--variants", type=int, default=2, metavar="K",
                         help="drafts per report; one sample proves nothing")
+    parser.add_argument("--run-ids", nargs="+", metavar="ID",
+                        help="bench these specific runs instead of the last N")
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--check", action="store_true",
                         help="also check each draft (needs check.py; off by default "
@@ -164,7 +173,8 @@ def main(argv=None) -> int:
                         format="%(levelname)s %(name)s: %(message)s")
 
     with _BlockNarration():
-        bench(args.bench, args.variants, temperature=args.temperature, check=args.check)
+        bench(args.bench, args.variants, temperature=args.temperature,
+              check=args.check, run_ids=args.run_ids)
     return 0
 
 

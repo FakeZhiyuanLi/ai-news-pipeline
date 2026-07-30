@@ -8,7 +8,7 @@ Gates run in order; the first two are free and happen BEFORE any model call:
   2. COVERED — anything already in the ledger by URL is dropped. A related
                title (find_related) is NOT dropped: it is flagged
                is_update=True with the prior slots attached.
-  3. RANK    — one CHEAP_MODEL call scoring all survivors together, title
+  3. RANK    — one "rank" model call scoring all survivors together, title
                plus the first ~400 chars of summary each. Never one call per
                candidate.
 
@@ -115,8 +115,7 @@ def _rank(survivors: list[dict], run) -> list[dict]:
         lines.append(f"[{i}] {cand['title']}\n    {summary}")
     prompt = _RANK_PROMPT.format(max_score=config.RANK_MAX_SCORE,
                                  candidates="\n".join(lines))
-    result = llm.json_call(config.CHEAP_MODEL, prompt, _RANK_SCHEMA,
-                           run=run, purpose="rank-candidates")
+    result = llm.json_call("rank", prompt, _RANK_SCHEMA, run=run)
 
     by_index = {s["index"]: s for s in result["scores"]}
     missing = [i for i in range(len(survivors)) if i not in by_index]

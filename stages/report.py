@@ -1,7 +1,7 @@
 """report: turn the picked story's page into reporting notes. Writes report.json.
 
 This is the stage that decides whether any of this is worth watching;
-everything downstream is plumbing. One STRONG_MODEL call extracts REPORTING
+everything downstream is plumbing. One "report" model call extracts REPORTING
 notes, not a spec sheet: every slot is drawn only from the source text, null
 where unsupported — and null is a correct answer. There is no fixed item
 count; numbers may hold one entry or twelve, ranked by consequence because
@@ -73,7 +73,12 @@ Slots:
   consequential first. Include a number only if it changes what someone can
   do, or is surprising. Ten routine version bumps are one entry, not ten.
   There is no target count — one entry and twelve are both correct answers
-  when that is what the article supports.
+  when that is what the article supports, and ZERO is a correct answer for an
+  article that carries no meaningful numbers.
+  Every entry must stand alone as a sentence a person would say: carry the
+  unit and what it measures, not just the figure. "1.1" is not a number in
+  this sense — it is a fragment, and a bare fragment invites the writer to
+  invent a meaning for it. Drop it rather than emit it.
 - scale_anchor: ONE of the numbers restated in human terms using one of the
   reference values listed below, and nothing else. anchor_math must be a
   checkable arithmetic expression over the article's number and the reference
@@ -269,8 +274,7 @@ def _extract_slots(story: dict, source_text: str, run) -> dict:
             prior_slots=", ".join(story["prior_slots"]) or "unknown")
     prompt = _PROMPT.format(scales=scales, update_context=update_context,
                             title=story["title"], text=source_text)
-    slots = llm.json_call(config.STRONG_MODEL, prompt, _REPORT_SCHEMA,
-                          run=run, purpose="extract-report")
+    slots = llm.json_call("report", prompt, _REPORT_SCHEMA, run=run)
 
     quote = slots.get("quote")
     if quote and quote["text"] not in source_text:
