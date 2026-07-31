@@ -32,7 +32,7 @@ python -m stages.narrate --resolve-voice     # prints the id to paste into .env
 python run.py                    # every stage in order, on a new run
 python run.py --stage report     # one stage
 python run.py --resume           # continue the most recent run
-python run.py --run-id <id> --stage draft
+python run.py --run-id run7 --stage draft
 python run.py --render           # render video.mp4 into the run directory
 ```
 
@@ -48,8 +48,9 @@ Other flags:
 
 ## The pipeline
 
-Each stage reads and writes artifacts in `runs/<run_id>/`. Artifacts are immutable —
-writing one twice raises.
+Each stage reads and writes artifacts in `runs/run1/`, `runs/run2/`, ... — numbered
+in creation order and sorted numerically, so `run10` follows `run9`. Artifacts are
+immutable — writing one twice raises.
 
 | stage | reads | writes | what it does |
 | --- | --- | --- | --- |
@@ -114,9 +115,26 @@ SHA-256 of text, voice, model and settings.
 ### render
 
 `renderer/` holds one Remotion composition. Duration is derived from the narration's
-measured length, never from an estimate. Two treatments per line: a source image
-cropped to fill and slowly panned, or typographic if the line has no image. Subtitles
-are word-by-word from the alignment.
+measured length, never from an estimate.
+
+**One treatment per beat kind**, selected by `beats[].kind` rather than by whether a
+photo exists — journalism sources carry one decorative hero image, so a photo-first
+design starved. All six work with zero images, which is the common case:
+
+| kind | treatment |
+| --- | --- |
+| `hook` | caption-dominant, largest type in the video |
+| `proof` | number card: the figure counting up, unit resolving beneath |
+| `funnel` | two bars, larger first, animated so the drop is what the eye follows |
+| `quote` | pull-quote card with speaker and compressed role; never over a photo |
+| `catch` | the caveat struck through, the consequence beneath it |
+| `closer` | the hook's composition, resolved |
+
+The visual state changes at least every 3 seconds, including within a long beat.
+Subtitles are word-by-word from the alignment. All text sits inside a safe box — 10% at
+the sides, 8% top, 20% bottom — because platform UI covers the frame edges. A caption
+that cannot fit two lines at the minimum size fails the render rather than shipping
+clipped.
 
 `run.py --render` refuses a script that failed checking or has no audio, then verifies
 the output: mean volume must not be ~-91 dB (silence), video duration must be within
@@ -137,7 +155,7 @@ bench.py        regenerate drafts over existing reports and read them side by si
 stages/         find, pick, report, draft, check, narrate
 checks/         claims, quotes, numbers, prose, sentences — pure where possible
 renderer/       one Remotion composition
-tests/          97 tests, including tests/test_architecture.py
+tests/          139 tests, including tests/test_architecture.py
 ```
 
 Four layer rules — one module per SDK, all filesystem access in `runs.py`, one
@@ -164,7 +182,7 @@ or SGLang deployment needs no code change.
 
 ```sh
 python bench.py --variants 3 --bench 5
-python bench.py --run-ids <id> <id> --draft-model accounts/fireworks/models/kimi-k3
+python bench.py --run-ids run3 run5 --draft-model accounts/fireworks/models/kimi-k3
 ```
 
 Regenerates drafts over existing reports — `find`, `pick`, `report`, `narrate` and
@@ -172,14 +190,15 @@ render do not run. Prints each script with its sentence lengths, which report sl
 used, and the pairwise word overlap between variants; above ~90% the prompt is
 over-constrained. Importing the narration SDK during a bench raises.
 
-Output goes to `data/bench/<timestamp>.md` and stdout. Total spend is asserted under
-`BENCH_MAX_SPEND_USD`.
+Output goes to `data/bench/bench1.md`, `bench2.md`, ... and stdout. Total spend is
+asserted under `BENCH_MAX_SPEND_USD`.
 
 ## Testing
 
 ```sh
-python -m pytest tests/ -q          # 97 tests, no network
+python -m pytest tests/ -q          # 139 tests, no network
 python -m pytest tests/ -m live     # hits the API: schema enforcement per model
+python -m pytest tests/ -m slow     # renders frames through Remotion; ~2min
 python run.py --selftest            # full draft + check on fixtures, zero API calls
 python -m checks.prose              # every module runs standalone
 ```

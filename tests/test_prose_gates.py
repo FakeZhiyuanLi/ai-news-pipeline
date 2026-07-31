@@ -7,7 +7,7 @@ them, and the COPY is what it emits now.
 
 import pytest
 
-from checks import numbers, prose
+from checks import numbers, prose, sentences
 
 NOTES = (
     "The Trump administration allocated $5 billion to AI-focused research grants "
@@ -82,3 +82,68 @@ def test_rhythm_rules(lengths, should_fail):
 def test_anchor_usefulness(expression, useful):
     ok, _reason = numbers.anchor_is_useful({"anchor_math": expression})
     assert ok is useful, expression
+
+
+def test_a_multi_sentence_quote_keeps_its_length_exemption():
+    """The splitter divides a two-sentence quote before the rhythm check sees
+    it, so looking for the whole span inside one sentence never matched and
+    the exemption silently vanished — which made every story with a
+    two-sentence quote structurally undraftable."""
+    quote = ("We continue to work with our government partners to conduct "
+             "their own independent testing of our models. This includes "
+             "Opus 5.")
+    parts = sentences.split(f'Anthropic spokesperson Danielle Ghiglieri: "{quote}"')
+    assert len(parts) > 1, "this test is only meaningful if the quote splits"
+    assert prose.rhythm_problems(parts + ["Short line."], exempt_long=[quote]) == []
+
+
+def test_the_quote_exemption_is_not_a_loophole():
+    """A long sentence that merely echoes a few of the quote's words must
+    still be rejected for its length."""
+    quote = ("We continue to work with our government partners to conduct "
+             "their own independent testing of our models.")
+    sneaky = ("We continue to believe this rambling sentence about nothing in "
+              "particular whatsoever should absolutely still be rejected purely "
+              "for its excessive length.")
+    problems = prose.rhythm_problems([sneaky, "Short."], exempt_long=[quote])
+    assert any("over 20 words" in p for p in problems)
+
+
+def test_an_unavoidable_identifier_is_not_passthrough():
+    """"38.3% on the ARC-AGI-3 public set" is 8 tokens with no paraphrase —
+    every content word is a figure or a benchmark name. Counting raw tokens
+    rejected it three redrafts running and made the story undraftable."""
+    notes = ("GPT-5.6 Sol scored 38.3% on the ARC-AGI-3 public set with retained "
+             "reasoning and compaction. With the official harness, it scored "
+             "13.3% on the same public set.")
+    names = {"gpt", "sol", "arc", "agi", "3"}
+    assert prose.find_passthrough(
+        ["It hit 38.3% on the ARC-AGI-3 public set."], notes,
+        proper_nouns=names) == []
+
+
+def test_the_notes_read_aloud_are_still_passthrough():
+    """The exemption must not swallow the case the gate exists for."""
+    notes = ("GPT-5.6 Sol scored 38.3% on the ARC-AGI-3 public set with retained "
+             "reasoning and compaction.")
+    names = {"gpt", "sol", "arc", "agi", "3"}
+    assert prose.find_passthrough(
+        ["GPT-5.6 Sol scored 38.3% on the ARC-AGI-3 public set with retained "
+         "reasoning and compaction."], notes, proper_nouns=names) != []
+
+
+def test_ordinary_prose_still_trips_at_eight_words():
+    notes = ("Evals rarely measure models in isolation, they also measure a "
+             "bundle of less visible choices about API settings.")
+    assert prose.find_passthrough(
+        ["Evals rarely measure models in isolation, they also measure a bundle."],
+        notes) != []
+
+
+def test_caption_duplication_is_still_caught_by_a_run_of_names():
+    """The caption gate asks the OPPOSITE question — is this the same text
+    twice — so a repeated run of figures and names is the duplication it must
+    catch, and it must not inherit the passthrough exemption."""
+    run, _ = prose.longest_shared_run("5,000 labs asked for AI money",
+                                      "5,000 labs asked for AI money today.")
+    assert run >= 4

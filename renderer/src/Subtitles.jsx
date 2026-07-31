@@ -1,6 +1,7 @@
 import React from 'react';
 import {useCurrentFrame} from 'remotion';
 import {FPS} from './schema.js';
+import {SAFE} from './layout.js';
 
 // Word-by-word, driven entirely by the words array from the ElevenLabs
 // alignment. NEVER estimated from character counts — real per-word timings
@@ -24,10 +25,11 @@ export const Subtitles = ({line}) => {
     <div
       style={{
         position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 320,
-        padding: '0 72px',
+        left: SAFE.left,
+        right: SAFE.right,
+        // Inside the bottom safe margin: platform UI covers the lower edge,
+        // and the treatments above stop at HEIGHT - SAFE.bottom.
+        bottom: SAFE.bottom - 200,
         display: 'flex',
         flexWrap: 'wrap',
         justifyContent: 'center',

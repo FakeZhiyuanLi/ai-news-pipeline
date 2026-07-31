@@ -20,6 +20,14 @@ export const defaultProps = {
   durationSeconds: 10,
   audioSrc: null,
   title: '',
+  // Persistent on-screen overlay. Written by draft, verified by check, never
+  // spoken — distinct from `title`, which is the source badge.
+  caption: '',
   lines: [],
   images: [],
+  // One treatment per beat kind — the visual layer is selected by what the
+  // beat DOES, not by whether a photo happens to exist.
+  beatKinds: [],
+  // Named speaker for the pull-quote card, from the report's quote slot.
+  speaker: null,
 };

@@ -20,12 +20,32 @@ ABBREVIATIONS = ("u.s.", "u.k.", "e.g.", "i.e.", "inc.", "ltd.", "corp.",
 # stays with the sentence it closes.
 _BOUNDARY_RE = re.compile(r'[.!?]["\'”’)\]]*(?=\s)')
 
+# A CLOSING QUOTATION MARK followed by whitespace and a capital letter is also
+# a boundary, even with no terminator inside the quote. Source quotes arrive
+# without terminal punctuation once a dangling comma is trimmed ('"...HAWK is
+# dead," she says' -> "...HAWK is dead"), and the script then reads
+#   Sophie Schmieg: "Basically with this paper, HAWK is dead" The cost was...
+# which fused a quotation and a separate fact into one 20-word sentence and
+# tripped the passthrough gate.
+#
+# This does NOT reintroduce capitalisation-based splitting: the signal is the
+# closing quote, and a bare period keeps the whitespace rule. `torch.compile`
+# and `npm install` contain no quotation mark, so they are untouched.
+_QUOTE_BOUNDARY_RE = re.compile(r'(?<=[^\s.!?])["”](?=\s+[A-Z])')
+
+
+def _boundaries(text: str):
+    """Every split point, in order: terminators, plus unpunctuated closing
+    quotations."""
+    ends = {m.end() for m in _BOUNDARY_RE.finditer(text)}
+    ends |= {m.end() for m in _QUOTE_BOUNDARY_RE.finditer(text)}
+    return sorted(ends)
+
 
 def split(text: str) -> list[str]:
     sentences: list[str] = []
     start = 0
-    for match in _BOUNDARY_RE.finditer(text):
-        end = match.end()
+    for end in _boundaries(text):
         candidate = text[start:end]
         words = candidate.split()
         last_word = words[-1].lower() if words else ""
@@ -60,6 +80,14 @@ if __name__ == "__main__":
         ("No trailing terminator", ["No trailing terminator"]),
         ("It costs $5.25 per token. npm install works now.",
          ["It costs $5.25 per token.", "npm install works now."]),
+        # A source quote whose dangling comma was trimmed has no terminal
+        # punctuation, so the quotation and the next fact fused into one
+        # 20-word sentence and tripped the passthrough gate.
+        ('Sophie Schmieg: "HAWK is dead" The cost was $100,000.',
+         ['Sophie Schmieg: "HAWK is dead"', "The cost was $100,000."]),
+        # ...but a quotation mid-sentence is not a boundary.
+        ('She called it "dead" and moved on.',
+         ['She called it "dead" and moved on.']),
     ]
     failures = 0
     for text, expected in cases:

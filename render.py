@@ -12,6 +12,7 @@ Two rules that the rest of the file exists to enforce:
 """
 
 import json
+import re
 import logging
 import subprocess
 
@@ -25,19 +26,161 @@ class RenderError(RuntimeError):
     """Refused to render, or the renderer failed."""
 
 
-def _usable_images(report: dict, line_count: int) -> list[dict | None]:
-    """One image slot per line, or None for a typographic treatment.
+# Safe-area geometry, mirrored from renderer/src/layout.js. Duplicated
+# deliberately: the renderer cannot import Python and the tests must assert
+# these numbers without running Node.
+SAFE_MARGIN_SIDES = 0.10
+SAFE_MARGIN_TOP = 0.08
+SAFE_MARGIN_BOTTOM = 0.20
 
-    Images are spread across the lines rather than repeated: a line either
-    gets a real image from the article or it is typographic. There is no
-    stock library and no selection logic beyond this.
+# Caption fitting, mirrored from renderer/src/Caption.jsx.
+CAPTION_MAX_LINES = 2
+CAPTION_MAX_FONT = 86
+CAPTION_MIN_FONT = 54
+CAPTION_ADVANCE = 0.56
+
+
+def _wrap_words(text: str, chars_per_line: int) -> list[str]:
+    """Greedy wrap on word boundaries. Never hyphenates."""
+    lines, current = [], ""
+    for word in str(text).split():
+        candidate = f"{current} {word}" if current else word
+        if len(candidate) > chars_per_line and current:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines
+
+
+def fit_caption(caption: str, *, width: int = 1080) -> dict | None:
+    """Largest size at which the caption fits two lines inside the safe box.
+
+    None means it cannot fit, and the caller REFUSES TO RENDER. A clipped or
+    ellipsised headline sits on screen for the whole video and is the part a
+    viewer screenshots — shipping a truncated one is worse than not shipping.
     """
-    images = [im for im in report.get("images", [])
-              if im.get("width") and im.get("height")]
+    text = str(caption or "").strip()
+    if not text:
+        return None
+    usable = width - 2 * round(width * SAFE_MARGIN_SIDES)
+    for size in range(CAPTION_MAX_FONT, CAPTION_MIN_FONT - 1, -2):
+        chars = int(usable / (size * CAPTION_ADVANCE))
+        if chars < 4:
+            continue
+        lines = _wrap_words(text, chars)
+        if len(lines) <= CAPTION_MAX_LINES and max(map(len, lines)) <= chars:
+            return {"size": size, "lines": lines}
+    return None
+
+
+_YEAR_RE = re.compile(r"/(20\d\d)/")
+
+
+def _upload_year(url: str) -> int | None:
+    """The year in a CMS upload path: /wp-content/uploads/2018/10/Dang.jpg."""
+    match = _YEAR_RE.search(url)
+    return int(match.group(1)) if match else None
+
+
+def _story_year(report: dict) -> int | None:
+    story = report.get("story") or {}
+    for value in (story.get("published"), story.get("url", "")):
+        match = re.search(r"(20\d\d)", str(value))
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def beat_kinds_per_line(script: dict, lines: list[dict]) -> list[str]:
+    """One kind per NARRATION LINE, not per beat.
+
+    A beat may hold more than one sentence — "The catch: it only worked on a
+    weakened version... Likely infeasible outside a lab." is one catch beat —
+    and narrate splits on sentences, so lines outnumber beats. Indexing kinds
+    by position then shifted every treatment after the multi-sentence beat: the
+    closer treatment landed on a caveat, and the real closer fell through to a
+    number card.
+
+    Each line is matched to the beat whose sentence contains it, so a beat that
+    produced two lines colours both.
+    """
+    beats = script.get("beats") or []
+    kinds = script.get("beat_kinds") or [b.get("kind") for b in beats]
+    if not beats:
+        return ["proof"] * len(lines)
+
+    normalised = [_normalise(b["sentence"]) for b in beats]
+    out, cursor = [], 0
+    for line in lines:
+        text = _normalise(line["text"])
+        # Walk forward from the last matched beat: beats are in script order,
+        # so a line never belongs to an earlier one.
+        found = None
+        for index in range(cursor, len(beats)):
+            if text and text in normalised[index]:
+                found = index
+                break
+        if found is None:
+            # Unmatched (punctuation drift): keep the previous line's kind
+            # rather than silently defaulting to proof.
+            found = cursor
+        cursor = found
+        out.append(kinds[found] if found < len(kinds) else "proof")
+    return out
+
+
+def _normalise(text: str) -> str:
+    """Lowercase words separated by single spaces, so a substring test is not
+    defeated by the punctuation narrate trims off a sentence boundary."""
+    return " ".join(re.sub(r"[^a-z0-9 ]", " ", str(text).lower()).split())
+
+
+def _usable_images(report: dict, line_count: int) -> list[dict | None]:
+    """One image slot per line, or None.
+
+    An image is now only ever a DARKENED BACKDROP behind a treatment, never
+    the subject — journalism sources carry one decorative hero image, so a
+    photo-first design starves. Every treatment renders with None here, which
+    is the common case rather than the fallback.
+
+    Author headshots are dropped. Filename patterns alone did not do it — a
+    byline portrait shipped as `Dang.jpg` at 600x400, indistinguishable from a
+    story photo by name or shape. What gives it away is the UPLOAD YEAR: the
+    portrait sits under /uploads/2018/ on a story published in 2026, because
+    the CMS stores a staff photo once and reuses it for years. A story's own
+    art is uploaded with the story.
+    """
+    story_year = _story_year(report)
+    images = []
+    seen = set()
+    for image in report.get("images", []):
+        if not (image.get("width") and image.get("height")):
+            continue
+        width, height = image["width"], image["height"]
+        url = image["url"].lower()
+        # Square and small: a byline portrait, not a story asset.
+        if width == height and width < 600:
+            continue
+        if "headshot" in url or "author" in url or "avatar" in url:
+            continue
+        year = _upload_year(url)
+        if story_year and year and year < story_year:
+            log.info("skipping stale asset (uploaded %d, story %d): %s",
+                     year, story_year, image["url"].rsplit("/", 1)[-1])
+            continue
+        # The same photo often appears at several widths.
+        stem = url.rsplit("/", 1)[-1].split("-")[0]
+        if stem in seen:
+            continue
+        seen.add(stem)
+        images.append(image)
+
     slots: list[dict | None] = [None] * line_count
     if not images:
         return slots
-    # Lede first, then spread the rest evenly over the remaining lines.
     step = max(1, line_count // max(1, len(images)))
     for index, image in enumerate(images):
         position = min(index * step, line_count - 1)
@@ -76,14 +219,35 @@ def build_props(run) -> dict:
 
     report = run.read("report") if run.exists("report") else {}
     lines = narration["lines"]
+
+    caption = script.get("caption", "")
+    if caption and not fit_caption(caption):
+        raise RenderError(
+            f"the caption does not fit two lines at the minimum size: "
+            f"{caption!r}. Refusing to render rather than clipping or "
+            "hyphenating a headline that sits on screen for the whole video.")
+
+    # The quote treatment names the speaker beneath the pull-quote; it comes
+    # from the report slot, not parsed back out of the sentence.
+    quote_slot = (report.get("slots") or {}).get("quote") or {}
+
     return {
         "runId": run.run_id,
         "title": script["story"]["title"],
+        # The persistent overlay: written by draft, verified by check, never
+        # spoken. Distinct from `title`, which is the source badge.
+        "caption": caption,
+        "speaker": {"name": quote_slot.get("name", ""),
+                    "role": quote_slot.get("role", "")} if quote_slot else None,
         # Real measured audio length. Not estimated_seconds.
         "durationSeconds": narration["duration_seconds"],
         "audioSrc": audio_name,
         "lines": lines,
         "images": _usable_images(report, len(lines)),
+        # What each beat DOES, so a funnel can be treated differently from a
+        # plain proof beat. Mapped PER LINE: a multi-sentence beat produces two
+        # narration lines, and indexing by beat shifted every later treatment.
+        "beatKinds": beat_kinds_per_line(script, lines),
     }
 
 
