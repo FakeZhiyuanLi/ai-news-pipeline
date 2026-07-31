@@ -14,7 +14,6 @@ two slots has collapsed regardless of how it reads.
 """
 
 import argparse
-import datetime as _dt
 import logging
 import sys
 
@@ -82,14 +81,17 @@ def _render_draft(d: dict, label: str) -> list[str]:
            f"  |  beats: **{len(d['beats'])}**",
            f"- sentence lengths: **{d['sentence_lengths']}**"
            f"  |  attempts: {d.get('attempts', 1)}",
-           f"- slots used: **{', '.join(d['slots_used'])}**"]
+           f"- slots used: **{', '.join(d['slots_used'])}**",
+           f"- beat kinds: **{' → '.join(d.get('beat_kinds') or [])}**",
+           f"- CAPTION: **{d.get('caption') or '(none)'}**"
+           f"  ({len((d.get('caption') or '').split())} words)"]
     if d["dropped_beats"]:
         out.append(f"- dropped (proof cap / MAX_SECONDS): "
                    f"{[b['slot'] for b in d['dropped_beats']]}")
     if d.get("banned_constructions"):
         out.append(f"- BANNED: {'; '.join(d['banned_constructions'])}")
     out += ["", "```", d["script_text"], "```", "", "beats:"]
-    out += [f"{i}. `[{b['slot']}]` {b['sentence']}"
+    out += [f"{i}. `[{b['kind']}/{b['slot']}]` {b['sentence']}"
             for i, b in enumerate(d["beats"], 1)]
     tagged = [b for b in d["beats"] if b["tts_sentence"] != b["sentence"]]
     out += ["", f"tts tags on {len(tagged)}/{len(d['beats'])} sentences", ""]
@@ -115,8 +117,10 @@ def bench(n: int, variants: int, *, temperature: float, check: bool,
     log.info("benching %d report(s) x %d variant(s)", len(selected), variants)
 
     marker = len(_costs_since(0))
-    stamp = _dt.datetime.now(_dt.timezone.utc).strftime(config.RUN_TIMESTAMP_FORMAT)
-    lines = [f"# bench {stamp}", "",
+    # Numbered, not timestamped: bench1.md, bench2.md, ... See
+    # runs.next_numbered_name for why the ordering is numeric.
+    filename = runs.next_numbered_name(config.BENCH_DIR, "bench", ".md")
+    lines = [f"# {filename.removesuffix('.md')}", "",
              f"{len(selected)} reports x {variants} variants, "
              f"temperature {temperature}, draft model "
              f"{config.MODELS['draft'][0].split('/')[-1]}", ""]
@@ -154,6 +158,8 @@ def bench(n: int, variants: int, *, temperature: float, check: bool,
                   f"slots: {', '.join(d['slots_used'])}"
                   + (f"  BANNED: {'; '.join(d['banned_constructions'])}"
                      if d.get("banned_constructions") else ""))
+            print(f"      kinds: {' → '.join(d.get('beat_kinds') or [])}")
+            print(f"      CAPTION: {d.get('caption') or '(none)'}")
             print(f"      {d['script_text']}")
 
         # Variants that agree too closely are not telling us anything: the
@@ -183,7 +189,7 @@ def bench(n: int, variants: int, *, temperature: float, check: bool,
     assert spend < config.BENCH_MAX_SPEND_USD, (
         f"bench spent ${spend:.5f}, over the ${config.BENCH_MAX_SPEND_USD} ceiling")
 
-    path = runs.write_text_file(config.BENCH_DIR, f"{stamp}.md", "\n".join(lines))
+    path = runs.write_text_file(config.BENCH_DIR, filename, "\n".join(lines))
     print(f"\nwrote {path}")
     return path
 
@@ -210,6 +216,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
+    runs.load_env()
 
     # Model selection belongs to config.MODELS; the bench may point the
     # "draft" purpose somewhere else for one run to compare writers.

@@ -270,6 +270,7 @@ if __name__ == "__main__":
     assert all(mapping[i] == -1 for i in range(0, 9)), "tag not skipped"
     print(f"index map OK: {len(tts)} tts chars -> {len(positions)} script chars")
 
+    runs.load_env()
     current = runs.Run.resume(args.run_id) if args.run_id else runs.Run.latest()
     print(f"run {current.run_id}")
     if not current.exists("narration") or args.force_tts:

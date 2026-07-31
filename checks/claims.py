@@ -148,28 +148,45 @@ ARTICLE
 """
 
 
-def _numbered(script_sentences: list[str]) -> str:
+def _numbered(script_sentences: list[str], caption: str = "") -> str:
     lines = []
     for i, sentence in enumerate(script_sentences):
         previous = script_sentences[i - 1] if i else "(none — first sentence)"
         lines.append(f"[{i}] {sentence}\n    preceding: {previous}")
+    if caption:
+        # Appended last so the spoken sentences keep their indices, and marked
+        # so the checker knows it has no preceding sentence to resolve against
+        # — an on-screen caption stands alone by construction.
+        lines.append(f"[{len(script_sentences)}] {caption}\n"
+                     "    preceding: (none — this is the ON-SCREEN CAPTION, "
+                     "displayed for the whole video, not spoken. It stands "
+                     "alone: resolve nothing against the script.)")
     return "\n".join(lines)
 
 
-def extract(script_text: str, run, *, label: str | None = None) -> list[dict]:
-    """One "check" call over the whole script at temperature 0."""
+def extract(script_text: str, run, *, label: str | None = None,
+            caption: str = "") -> list[dict]:
+    """One "check" call over the whole script at temperature 0.
+
+    The caption rides along as a final indexed unit. It is claim-bearing —
+    legible and screenshottable for the full duration — so it is verified on
+    exactly the same path as a spoken sentence, at no extra call.
+    """
     script_sentences = sentences.split(script_text)
-    if not script_sentences:
+    if not script_sentences and not caption:
         return []
+    units = script_sentences + ([caption] if caption else [])
     result = llm.json_call("check", _EXTRACT_PROMPT.format(
-        numbered=_numbered(script_sentences)), _EXTRACT_SCHEMA,
+        numbered=_numbered(script_sentences, caption)), _EXTRACT_SCHEMA,
         run=run, temperature=0.0, label=label or "check-extract")
     claims = []
+    caption_index = len(script_sentences) if caption else None
     for raw in result["claims"]:
         index = raw["s"]
         claims.append({
             "sentence_index": index,
-            "sentence": script_sentences[index] if 0 <= index < len(script_sentences) else "",
+            "sentence": units[index] if 0 <= index < len(units) else "",
+            "is_caption": index == caption_index,
             "claim": raw["claim"],
             "type": raw["type"],
             "anaphoric": raw["anaphoric"],
@@ -206,6 +223,17 @@ def route(claims: list[dict], report_slots: dict) -> tuple[list[dict], list[dict
                                          or "no quote in the report to match")})
         elif kind == ARITHMETIC:
             expression = anchor_slot.get("anchor_math", "")
+            if not expression:
+                # No scale anchor in the report means there is no anchor
+                # arithmetic to recompute — NOT that the claim is false. The
+                # writer can do correct arithmetic over two report numbers
+                # ("$25 out against $15 is $10 more"), and auto-refuting it
+                # here reported "'' does not evaluate: invalid syntax" as
+                # though the SCRIPT were malformed, then forced a redraft.
+                # Hand it to the checker like any other factual claim.
+                pending.append({**claim, "type": FACTUAL,
+                                "reclassified_from": ARITHMETIC})
+                continue
             claimed = _number_in(claim["claim"])
             ok, _computed, why = numbers.verify_detail(expression, claimed)
             if ok and not numbers.uses_known_reference(expression):

@@ -215,6 +215,23 @@ def _resolve_run(args) -> runs.Run:
     return runs.Run.new()
 
 
+def _flush_logs_per_line() -> None:
+    """Make every log record hit the file immediately.
+
+    logging's StreamHandler wraps sys.stderr, which is block-buffered when it
+    is not a terminal. A backgrounded `python run.py > log` therefore wrote
+    ZERO bytes for the first several minutes — the run looked hung when it was
+    three stages in.
+    """
+    for handler in logging.getLogger().handlers:
+        stream = getattr(handler, "stream", None)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(line_buffering=True)
+            except (ValueError, AttributeError):
+                handler.flush()
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="run.py",
@@ -240,6 +257,10 @@ def main(argv=None) -> int:
     parser.add_argument("--force-tts", action="store_true",
                         help="narrate stage: bypass the audio cache")
     args = parser.parse_args(argv)
+
+    # Keys live in .env, which nothing else opens. Real environment variables
+    # win over the file, so CI can export them without editing anything.
+    runs.load_env()
 
     if args.costs:
         return _print_costs()
@@ -272,6 +293,10 @@ def main(argv=None) -> int:
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # A full run takes minutes and its progress is the only sign it is alive.
+    # Redirected to a file, the stream buffers and shows NOTHING until the
+    # process exits — indistinguishable from a hang. Flush every record.
+    _flush_logs_per_line()
 
     if args.stage:
         if args.stage not in STAGES:

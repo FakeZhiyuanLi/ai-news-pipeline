@@ -61,6 +61,34 @@ MAX_TAGS_PER_SENTENCE = 1
 # a six-number report became an eight-beat lab-notebook recital.
 MAX_PROOF_BEATS = 3
 
+# Every beat carries one of these. `funnel` is distinct from `proof`: it means
+# the beat pairs two numbers describing the same population, which the
+# renderer treats differently. Recorded explicitly because a null kind makes
+# it impossible downstream to tell a quote beat from a proof beat.
+BEAT_KINDS = ("hook", "proof", "funnel", "quote", "catch", "closer")
+
+# The closer bookends the hook and must be the shortest line in the script.
+# Under 10 words, and OMITTED where the report cannot support one that is not
+# filler — a script ending on a strong catch beats one padded with a hollow
+# closer.
+MAX_CLOSER_WORDS = 9
+
+# The persistent on-screen overlay. Read at a glance on a phone, so it stays
+# short. It is NOT spoken and is NOT a copy of the first sentence — subtitles
+# already show that, and duplicating it wastes the strongest real estate in
+# the frame.
+#
+# The ceiling is 9, not the 8 originally specified: across a 15-draft bench
+# the caption was the largest single cause of outright draft failure, and the
+# overrun was ALWAYS exactly one word ("States could skip public hearings
+# before building gas plants"). Nine words still reads at a glance; throwing
+# away an otherwise good script over the ninth does not buy legibility.
+CAPTION_MIN_WORDS = 5
+CAPTION_MAX_WORDS = 9
+# Sharing this many consecutive words with the first sentence makes the
+# caption a duplicate rather than the hook as text.
+CAPTION_MAX_SHARED_RUN = 4
+
 # There is no hook pool. A canned opener chosen before the story is known
 # cannot tease it, and "Here's what's new." is dead air in short-form. The
 # first sentence IS the lede — the most surprising concrete fact, under 12
@@ -71,10 +99,15 @@ MAX_PROOF_BEATS = 3
 # byte-identical, which means the constraints left exactly one output.
 DRAFT_TEMPERATURE = 0.9
 
-# Attempts at the deterministic prose gates before giving up. Failing twice
-# means the prompt has stopped framing the task generatively — worth seeing,
-# not worth papering over.
-MAX_DRAFT_ATTEMPTS_PROSE = 2
+# Attempts at the deterministic prose gates before giving up.
+#
+# Raised from 2 to 3 when the gate count went from two (passthrough, rhythm)
+# to five (+ quote, caption, beat structure). Measured on one story: 50% of
+# first drafts pass and each gate fails independently ~17% of the time, so two
+# attempts left a ~25% chance of losing a story that has nothing wrong with
+# it. This is a budget for INDEPENDENT gates, not leniency — each individual
+# gate still rejects on the first violation.
+MAX_DRAFT_ATTEMPTS_PROSE = 3
 
 # Wire-copy constructions the writer must not produce. Each entry is a regex
 # checked against script_text, with a human-readable label for the failure.
@@ -213,7 +246,9 @@ RUNS_DIR = "runs"
 COSTS_FILE = "costs.jsonl"
 LEDGER_FILE = "ledger.json"
 SOURCES_FILE = "sources.json"
-RUN_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"  # UTC; lexicographic order == time order
+# Run directories and bench output are numbered, not timestamped: run1, run2,
+# ... and bench1.md, bench2.md. Both sort numerically — see
+# runs.all_run_ids() for why string order is not safe here.
 
 # --- Ledger ----------------------------------------------------------------
 

@@ -178,3 +178,28 @@ def test_erosion_floor():
     assert check.erosion_problem(first, [{"slot": "tension"}]) is not None
     assert check.erosion_problem(
         first, [{"slot": "lede"}, {"slot": "tension"}]) is not None
+
+
+def test_arithmetic_without_a_scale_anchor_goes_to_the_checker():
+    """A report with no scale_anchor has no anchor arithmetic to recompute —
+    which does not make the writer's arithmetic false. Auto-refuting it
+    reported "'' does not evaluate: invalid syntax" as though the script were
+    malformed, and forced a redraft over correct sums."""
+    fixture = [{"sentence_index": 0, "sentence": "x", "type": claims.ARITHMETIC,
+                "anaphoric": False,
+                "claim": "Opus 5 costs $10 more per million output tokens."}]
+    settled, pending = claims.route(fixture, {"scale_anchor": None})
+    assert settled == []
+    assert len(pending) == 1
+    assert pending[0]["type"] == claims.FACTUAL
+    assert pending[0]["reclassified_from"] == claims.ARITHMETIC
+
+
+def test_arithmetic_with_an_anchor_is_still_settled_in_python():
+    fixture = [{"sentence_index": 0, "sentence": "x", "type": claims.ARITHMETIC,
+                "anaphoric": False, "claim": "that is about 27 mid-range GPUs"}]
+    settled, pending = claims.route(
+        fixture, {"scale_anchor": {"anchor_math": "15000 / 550",
+                                   "statement": "about 27 GPUs"}})
+    assert pending == []
+    assert settled[0]["checked_by"] == "checks.numbers"

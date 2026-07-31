@@ -171,6 +171,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
 
+    runs.load_env()
     current = runs.Run.resume(args.run_id) if args.run_id else runs.Run.latest()
     print(f"run {current.run_id}")
     if not current.exists("story"):

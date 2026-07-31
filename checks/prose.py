@@ -15,6 +15,14 @@ import statistics
 # catch passthrough, not paraphrase.
 MAX_VERBATIM_RUN = 8
 
+# A run must ALSO carry this many words the writer could have chosen
+# differently — not stopwords, not figures, not names. Measured against the
+# real failure: "38.3% on the ARC-AGI-3 public set" is 8 tokens with 2
+# authorial words and no paraphrase, while genuine passthrough runs 8+ words
+# of ordinary prose. 5 rejects the notes read aloud and passes an unavoidable
+# identifier.
+MIN_CONTENT_RUN = 5
+
 MAX_SENTENCE_WORDS = 20
 SHORT_SENTENCE_WORDS = 8   # at least one sentence must come in under this
 
@@ -63,11 +71,30 @@ def _is_inert(words: list[str]) -> bool:
 
 _NAMEY: set[str] = set()
 
+# Function words only. These carry no authorial choice, so a run made of
+# figures, names and these is unavoidable rather than copied. Deliberately
+# short: adding content words ("scored", "reduced", "tripled") would start
+# excusing real passthrough, which is the whole thing this gate catches.
+_STOPWORDS = frozenset("""
+a an the of on in at to for from with by and or but its it is was were be been
+that this these those as into over under after before than then so
+""".split())
+
 
 def longest_shared_run(sentence: str, notes: str, *,
-                       proper_nouns: set[str] | None = None) -> tuple[int, str]:
+                       proper_nouns: set[str] | None = None,
+                       min_content: int = 0) -> tuple[int, str]:
     """Longest run of consecutive words shared between a sentence and the
-    notes. Returns (length, the shared text)."""
+    notes. Returns (length, the shared text).
+
+    min_content skips runs carrying fewer than that many AUTHORIAL words —
+    words that are not stopwords, figures or names. Only the passthrough gate
+    wants this: it asks "did the writer copy the notes", and a benchmark's
+    name and score have no paraphrase. The caption check asks the opposite
+    question — "is this the same text twice" — where a repeated run of names
+    and figures is exactly the duplication it must catch, so it leaves this
+    at 0.
+    """
     a, b = normalise(sentence), normalise(notes)
     if not a or not b:
         return 0, ""
@@ -85,7 +112,24 @@ def longest_shared_run(sentence: str, notes: str, *,
             if k > best:
                 run = a[i:i + k]
                 # A run of only numbers, units and proper nouns is unavoidable.
-                if all(re.fullmatch(r"[\d.,%$]+", w) or w in names for w in run):
+                #
+                # Stopwords do not count toward "avoidable" either. "38.3% on
+                # the ARC-AGI-3 public set" is 8 words and has no paraphrase —
+                # every content word is a figure or a product name, and the
+                # only other words are `on`, `the`, `public`, `set`. Requiring
+                # the run to be ENTIRELY names failed it and made the story
+                # undraftable. Judge on the words the writer could have chosen
+                # differently.
+                content = [w for w in run if w not in _STOPWORDS
+                           and not re.fullmatch(r"[\d.,%$]+", w)
+                           and w not in names]
+                # Score the run by the words the writer COULD have chosen
+                # differently. "38.3% on the ARC-AGI-3 public set" is 8 tokens
+                # but only `public` and `set` are authorial — there is no
+                # paraphrase of a benchmark's name and score, and counting raw
+                # tokens made that story undraftable across three redrafts.
+                # An 8-word run of ordinary prose still has 8 content words.
+                if len(content) < min_content:
                     continue
                 best, best_text = k, " ".join(run)
     return best, best_text
@@ -107,7 +151,8 @@ def find_passthrough(sentences: list[str], notes: str, *,
         for span in (exempt or []):
             if span:
                 stripped = _remove_span(stripped, span)
-        run, text = longest_shared_run(stripped, notes, proper_nouns=proper_nouns)
+        run, text = longest_shared_run(stripped, notes, proper_nouns=proper_nouns,
+                                       min_content=MIN_CONTENT_RUN)
         if run >= limit:
             findings.append({"sentence": sentence, "run_words": run, "shared": text})
     return findings
@@ -142,11 +187,30 @@ def rhythm_problems(sentences: list[str], *,
         return ["no sentences"]
 
     def carries_exempt(sentence: str) -> bool:
+        """Does this sentence carry quoted material?
+
+        A quote of more than one sentence is SPLIT by the sentence splitter
+        before it gets here, so looking for the whole span inside one sentence
+        never matches and the exemption silently disappears — which made every
+        story with a two-sentence quote structurally undraftable. Match a
+        substantial contiguous run of the quote instead of all of it.
+        """
         hay = normalise(sentence)
+        if not hay:
+            return False
         for span in (exempt_long or []):
             needle = normalise(span)
-            if needle and any(hay[i:i + len(needle)] == needle
-                              for i in range(len(hay) - len(needle) + 1)):
+            if not needle:
+                continue
+            # The whole quote, when it fits in one sentence.
+            if any(hay[i:i + len(needle)] == needle
+                   for i in range(len(hay) - len(needle) + 1)):
+                return True
+            # Otherwise: most of THIS sentence is words taken from the quote.
+            # A passing attribution phrase shares a word or two; a sentence
+            # carrying half a quotation shares nearly all of them.
+            run, _ = longest_shared_run(sentence, span)
+            if run >= max(MAX_VERBATIM_RUN, len(hay) * 0.6):
                 return True
         return False
 
