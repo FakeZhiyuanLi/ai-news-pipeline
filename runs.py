@@ -9,10 +9,9 @@ the module-level helpers below.
 Artifacts are immutable: write() raises if the artifact already exists.
 """
 
-import datetime as _dt
 import json
+import os
 import re
-import secrets
 from pathlib import Path
 
 import config
@@ -62,6 +61,36 @@ def _write_json(path: Path, obj, exclusive: bool) -> None:
     text = json.dumps(obj, indent=2, ensure_ascii=False) + "\n"
     with path.open("x" if exclusive else "w", encoding="utf-8") as f:
         f.write(text)
+
+
+# --- .env ------------------------------------------------------------------
+# Reading .env is filesystem access, so it lives here rather than in llm.py or
+# tts.py. Without this the documented setup does not work: README says "cp
+# .env.example .env, then fill in the keys", but nothing read the file, so the
+# keys only resolved when they happened to be exported in the shell — and the
+# error message told you to add them to a file that was never opened.
+#
+# Deliberately not python-dotenv: this is twelve lines and one fewer pin.
+
+
+def load_env(name: str = ".env") -> int:
+    """Load KEY=VALUE lines into os.environ WITHOUT overwriting anything
+    already exported — a real environment variable must always win over a
+    checked-out file. Returns how many keys were set."""
+    path = _resolve(name)
+    if not path.exists():
+        return 0
+    loaded = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if value and key not in os.environ:
+            os.environ[key] = value
+            loaded += 1
+    return loaded
 
 
 # --- Project-level data files (ledger.json, sources.json, costs.jsonl) -----
@@ -135,6 +164,32 @@ def file_exists(name: str) -> bool:
     return _resolve(name).exists()
 
 
+def read_text_file(name: str) -> str:
+    """A project-relative text file, verbatim. Used by tests that assert the
+    renderer's JS constants still match their Python mirrors."""
+    return _resolve(name).read_text(encoding="utf-8")
+
+
+def next_numbered_name(directory: str, prefix: str, suffix: str) -> str:
+    """`bench1.md`, `bench2.md`, ... one higher than the highest present.
+
+    Sorted NUMERICALLY like run ids, for the same reason: these used to be UTC
+    timestamps, where string order equalled creation order. `bench10` sorts
+    before `bench2` as a string, so "the most recent bench" read off a plain
+    listing would be wrong once a tenth exists.
+    """
+    target = _resolve(directory)
+    if not target.is_dir():
+        return f"{prefix}1{suffix}"
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+){re.escape(suffix)}$")
+    highest = 0
+    for entry in target.glob("*"):
+        match = pattern.match(entry.name)
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return f"{prefix}{highest + 1}{suffix}"
+
+
 def write_text_file(directory: str, filename: str, text: str) -> str:
     """Write a human-readable report (bench output, README) and return its
     path. Not a run artifact — those go through Run.write."""
@@ -173,11 +228,32 @@ def fixture_text(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+_RUN_ID_RE = re.compile(r"^run(\d+)$")
+
+
+def run_number(run_id: str) -> int | None:
+    """The ordinal in a `runN` id, or None if it is not one."""
+    match = _RUN_ID_RE.match(run_id)
+    return int(match.group(1)) if match else None
+
+
 def all_run_ids() -> list[str]:
+    """Every run, OLDEST FIRST — `latest()` takes the last element.
+
+    Sorted NUMERICALLY, not lexicographically. The ids used to be UTC
+    timestamps, where string order happened to equal time order; `run2` and
+    `run10` do not have that property, and a plain sort would make run10 the
+    second-oldest and hand `--resume` the wrong directory.
+    """
     root = _runs_root()
     if not root.is_dir():
         return []
-    return sorted(d.name for d in root.glob("*") if d.is_dir())
+    names = [d.name for d in root.glob("*") if d.is_dir()]
+    numbered = sorted((n for n in names if run_number(n) is not None),
+                      key=run_number)
+    # Anything not matching runN (an older timestamped directory) sorts before
+    # the numbered ones, so it is never picked as "latest".
+    return sorted(n for n in names if run_number(n) is None) + numbered
 
 
 class Run:
@@ -192,11 +268,23 @@ class Run:
 
     @classmethod
     def new(cls) -> "Run":
-        stamp = _dt.datetime.now(_dt.timezone.utc).strftime(config.RUN_TIMESTAMP_FORMAT)
-        run_id = f"{stamp}-{secrets.token_hex(2)}"
-        run = cls(run_id, _runs_root())
-        run._dir.mkdir(parents=True)
-        return run
+        """The next `runN`, one higher than the highest that exists.
+
+        mkdir is exclusive, so two runs starting at once cannot claim the same
+        number — the loser retries against the now-higher maximum rather than
+        writing into a directory that already holds another run's artifacts.
+        """
+        root = _runs_root()
+        root.mkdir(parents=True, exist_ok=True)
+        highest = max((run_number(n) or 0 for n in all_run_ids()), default=0)
+        for candidate in range(highest + 1, highest + 100):
+            run = cls(f"run{candidate}", root)
+            try:
+                run._dir.mkdir(parents=True)
+            except FileExistsError:
+                continue
+            return run
+        raise RuntimeError("could not allocate a run number")
 
     @classmethod
     def resume(cls, run_id: str) -> "Run":

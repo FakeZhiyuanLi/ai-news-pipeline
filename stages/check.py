@@ -40,7 +40,18 @@ class CheckFailed(RuntimeError):
 
 
 def _proof_beats(beats: list[dict]) -> list[dict]:
-    return [b for b in beats if b["slot"] not in ("lede", "tension")]
+    """Beats that actually support the hook. The closer restates the stake
+    rather than proving it, so a script eroded down to hook + closer has no
+    proof left and must not pass the floor on a technicality.
+
+    Judged on KIND, not slot: which slot a beat drew from says nothing about
+    what it does in the script — a hook is routinely built from a number, and
+    a proof beat from the lede note. `quote` and `funnel` are proof.
+    """
+    proving = {"proof", "funnel", "quote"}
+    return [b for b in beats
+            if (b["kind"] in proving if b.get("kind")
+                else b["slot"] not in ("lede", "tension"))]
 
 
 def erosion_problem(first_beats: list[dict], final_beats: list[dict]) -> str | None:
@@ -50,9 +61,14 @@ def erosion_problem(first_beats: list[dict], final_beats: list[dict]) -> str | N
         return (f"erosion floor: {len(final_beats)} of {len(first_beats)} beats "
                 f"survived, fewer than half — the story has been checked into "
                 "something thinner than it started")
+    # Ask for the opening BEAT, not the lede SLOT. The hook is frequently
+    # sourced from a number or the tension rather than the lede note — "5,000
+    # labs asked Washington for AI money" is a hook built from a number — so
+    # checking the slot rejected scripts that open perfectly well.
     slots = {b["slot"] for b in final_beats}
-    if "lede" not in slots:
-        return "the final script has no lede"
+    kinds = {b.get("kind") for b in final_beats}
+    if "hook" not in kinds and "lede" not in slots:
+        return "the final script has no opening beat"
     if not _proof_beats(final_beats):
         return "the final script has no proof beat — nothing supports the lede"
     return None
@@ -60,9 +76,16 @@ def erosion_problem(first_beats: list[dict], final_beats: list[dict]) -> str | N
 
 def check_once(draft_artifact: dict, report: dict, run, *,
                attempt: int) -> dict:
-    """Extract, route, verify. Returns the verdict for one draft."""
+    """Extract, route, verify. Returns the verdict for one draft.
+
+    The caption is checked with the script, not after it. It is on screen for
+    the whole video and is the part a viewer screenshots, so an unverified
+    caption is a worse liability than an unverified spoken line — and it is
+    free to include, since extraction is one batched call either way.
+    """
     extracted = claim_checks.extract(
-        draft_artifact["script_text"], run, label=f"check-extract-{attempt}")
+        draft_artifact["script_text"], run, label=f"check-extract-{attempt}",
+        caption=draft_artifact.get("caption", ""))
     settled, pending = claim_checks.route(extracted, report["slots"])
     verified = claim_checks.verify_against_source(
         pending, report["source_text"], run, report_slots=report["slots"],
@@ -134,11 +157,19 @@ def run(run) -> None:
             problem = erosion_problem(first_beats, current["beats"])
             if problem:
                 raise _fail(run, report, current, history, reached_for, problem)
+            # Nothing downstream can distinguish a funnel beat from a plain
+            # proof beat without this, and the renderer needs to.
+            kind_problems = draft.kind_problems(current["beats"])
+            if kind_problems:
+                raise _fail(run, report, current, history, reached_for,
+                            "; ".join(kind_problems))
             run.write("script", {
                 "story": report["story"],
+                "caption": current.get("caption", ""),
                 "script_text": current["script_text"],
                 "tts_text": current["tts_text"],
                 "beats": current["beats"],
+                "beat_kinds": [b["kind"] for b in current["beats"]],
                 "sentences": current["sentences"],
                 "sentence_lengths": current["sentence_lengths"],
                 "word_count": current["word_count"],
@@ -201,6 +232,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(levelname)s %(name)s: %(message)s")
 
+    runs.load_env()
     current_run = runs.Run.resume(args.run_id) if args.run_id else runs.Run.latest()
     print(f"run {current_run.run_id}")
     if not current_run.exists("script"):
